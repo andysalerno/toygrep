@@ -2,12 +2,12 @@ use peeking_take_while::PeekableExt;
 
 #[derive(Debug, Default)]
 pub struct UserInput {
-    search_pattern: String,
-    search_targets: Vec<String>,
+    pub search_pattern: String,
+    pub search_targets: Vec<String>,
 
-    recursive: bool,
-    whole_word: bool,
-    case_insensitive: bool,
+    pub recursive: bool,
+    pub whole_word: bool,
+    pub case_insensitive: bool,
 }
 
 /// Parses the given arguments, following this expected format:
