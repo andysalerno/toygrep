@@ -1,13 +1,13 @@
 use peeking_take_while::PeekableExt;
+use std::path::PathBuf;
 
 #[derive(Debug, Default)]
 pub(crate) struct UserInput {
     pub(crate) debug_enabled: bool,
 
     pub(crate) search_pattern: String,
-    pub(crate) search_targets: Vec<String>,
+    pub(crate) search_targets: Vec<PathBuf>,
 
-    pub(crate) recursive: bool,
     pub(crate) whole_word: bool,
     pub(crate) case_insensitive: bool,
 }
@@ -25,7 +25,6 @@ pub(crate) fn capture_input(args: impl Iterator<Item = String>) -> UserInput {
         match arg.as_str() {
             "-i" => user_input.case_insensitive = true,
             "-w" => user_input.whole_word = true,
-            "-r" => user_input.recursive = true,
             "-d" => user_input.debug_enabled = true,
             _ => {
                 panic!("Unknown flag: {}", arg);
@@ -39,7 +38,7 @@ pub(crate) fn capture_input(args: impl Iterator<Item = String>) -> UserInput {
     }
 
     // Finally, the file(s)/directory(ies) to search.
-    user_input.search_targets = args.collect();
+    user_input.search_targets = args.map(|a| a.into()).collect();
 
     user_input
 }
