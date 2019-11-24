@@ -120,7 +120,21 @@ async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<St
 }
 
 async fn search_file(file_path: &Path, pattern: &Regex) -> IoResult<String> {
+    let bytes = fs::read(file_path).await?;
+
+    let sample = &bytes[17960..17970];
+    println!("{:?}", sample);
+
+    // let test = std::str::from_utf8(&bytes);
+
+    // if let Err(e) = test {
+    //     panic!("problem: {:?}", e);
+    // }
+
     let content = fs::read_to_string(file_path).await?;
+
+    // let as_utf8 = String::from_utf8(content);
+
     let mut result = String::new();
 
     let lines = content.lines();
