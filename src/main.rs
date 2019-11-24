@@ -18,7 +18,6 @@ mod arg_parse;
 
 use async_std::fs;
 use async_std::io::Result as IoResult;
-use async_std::sync::{Arc, Mutex};
 use regex::Regex;
 use std::path::Path;
 use std::sync::mpsc::channel;
@@ -76,8 +75,6 @@ async fn search_target(target_path: &Path, pattern: &Regex) -> IoResult<String> 
 }
 
 async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<String> {
-    dbg!("Searching directory: {:?}", directory_path);
-
     let (sender, receiver) = channel();
 
     sender
@@ -86,13 +83,11 @@ async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<St
 
     let mut spawned_tasks = Vec::new();
 
-    for dir_path in  receiver.try_iter() {
-        let sender = sender.clone();
-
+    for dir_path in receiver.try_iter() {
         let dir_children = dir_path.read_dir()?;
 
         for dir_child in dir_children {
-            let dir_child = dbg!(dir_child?.path());
+            let dir_child = dir_child?.path();
             let pattern = pattern.clone();
 
             if dir_child.is_file() {
@@ -102,24 +97,22 @@ async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<St
                         .await
                         .expect("search failed");
 
-                    dbg!(child_search_result)
+                    child_search_result
                 });
 
-                dbg!(spawned_tasks.push(task));
+                spawned_tasks.push(task);
             } else if dir_child.is_dir() {
                 sender
                     .send(dir_child)
                     .expect("Failure sending over sync channel.");
             }
         }
-
-        dbg!(drop(sender));
     }
 
-    let mut search_result = dbg!(String::new());
+    let mut search_result = String::new();
 
     for task in spawned_tasks {
-        let mut result = dbg!(task.await);
+        let mut result = task.await;
         search_result.extend(result.drain(..));
     }
 
