@@ -74,13 +74,23 @@ async fn search_target(target_path: &Path, pattern: &Regex) -> IoResult<String> 
 }
 
 async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<String> {
-    let dir_children = directory_path.read_dir()?;
+    let mut directory_queue = vec![directory_path.to_path_buf()];
 
     let mut result = String::new();
 
-    for child in dir_children {
-        let child_search_result = search_target(&child?.path(), pattern).await?;
-        result.push_str(&child_search_result);
+    while let Some(cur_dir) = directory_queue.pop() {
+        let dir_children = cur_dir.read_dir()?;
+
+        for dir_child in dir_children {
+            let dir_child = dir_child?.path();
+
+            if dir_child.is_file() {
+                let child_search_result = search_file(&dir_child, pattern).await?;
+                result.push_str(&child_search_result);
+            } else if dir_child.is_dir() {
+                directory_queue.push(dir_child);
+            }
+        }
     }
 
     Ok(result)
