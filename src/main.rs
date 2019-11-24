@@ -18,8 +18,10 @@ mod arg_parse;
 
 use async_std::fs;
 use async_std::io::Result as IoResult;
+use async_std::sync::{Arc, Mutex};
 use regex::Regex;
 use std::path::Path;
+use std::sync::mpsc::channel;
 
 #[async_std::main]
 async fn main() -> IoResult<()> {
@@ -74,26 +76,54 @@ async fn search_target(target_path: &Path, pattern: &Regex) -> IoResult<String> 
 }
 
 async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<String> {
-    let mut directory_queue = vec![directory_path.to_path_buf()];
+    dbg!("Searching directory: {:?}", directory_path);
 
-    let mut result = String::new();
+    let (sender, receiver) = channel();
 
-    while let Some(cur_dir) = directory_queue.pop() {
-        let dir_children = cur_dir.read_dir()?;
+    sender
+        .send(directory_path.to_path_buf())
+        .expect("Failure establishing sync channel.");
+
+    let mut spawned_tasks = Vec::new();
+
+    for dir_path in  receiver.try_iter() {
+        let sender = sender.clone();
+
+        let dir_children = dir_path.read_dir()?;
 
         for dir_child in dir_children {
-            let dir_child = dir_child?.path();
+            let dir_child = dbg!(dir_child?.path());
+            let pattern = pattern.clone();
 
             if dir_child.is_file() {
-                let child_search_result = search_file(&dir_child, pattern).await?;
-                result.push_str(&child_search_result);
+                let task = async_std::task::spawn(async move {
+                    let pattern = pattern.clone();
+                    let child_search_result = search_file(&dir_child, &pattern)
+                        .await
+                        .expect("search failed");
+
+                    dbg!(child_search_result)
+                });
+
+                dbg!(spawned_tasks.push(task));
             } else if dir_child.is_dir() {
-                directory_queue.push(dir_child);
+                sender
+                    .send(dir_child)
+                    .expect("Failure sending over sync channel.");
             }
         }
+
+        dbg!(drop(sender));
     }
 
-    Ok(result)
+    let mut search_result = dbg!(String::new());
+
+    for task in spawned_tasks {
+        let mut result = dbg!(task.await);
+        search_result.extend(result.drain(..));
+    }
+
+    Ok(search_result)
 }
 
 async fn search_file(file_path: &Path, pattern: &Regex) -> IoResult<String> {
