@@ -64,16 +64,26 @@ async fn search_target(target_path: &Path, pattern: &Regex) -> IoResult<String> 
         search_file(target_path, pattern).await
     } else if target_path.is_dir() {
         // If it's a directory, recurse into it and search all its contents.
-        panic!(
-            "Directories not supported yet. Directory: {}",
-            target_path.display()
-        );
+        search_directory(target_path, pattern).await
     } else {
         panic!(
             "Couldn't find file or dir at path: {}. Btw, this should be an Err, not a panic...",
             target_path.display()
         );
     }
+}
+
+async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<String> {
+    let dir_children = directory_path.read_dir()?;
+
+    let mut result = String::new();
+
+    for child in dir_children {
+        let child_search_result = search_target(&child?.path(), pattern).await?;
+        result.push_str(&child_search_result);
+    }
+
+    Ok(result)
 }
 
 async fn search_file(file_path: &Path, pattern: &Regex) -> IoResult<String> {
