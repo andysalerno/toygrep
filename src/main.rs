@@ -18,11 +18,11 @@ mod arg_parse;
 
 use async_std::fs;
 use async_std::io::Result as IoResult;
+use async_std::io::{stdin, BufReader, Read};
 use async_std::path::{Path, PathBuf};
 use async_std::prelude::*;
 use regex::Regex;
 use std::sync::mpsc::channel;
-use std::sync::Arc;
 
 const BIG_FILE_PAR_SEARCH_LIMIT_BYTES: u64 = 10_000_000;
 
@@ -57,6 +57,7 @@ async fn main() -> IoResult<()> {
     for target in targets {
         let path_buf: PathBuf = target.into();
         let path: &Path = &path_buf;
+
         let search_result = search_target(path, &regex).await?;
 
         println!("{}", search_result);
@@ -81,6 +82,8 @@ async fn search_target(target_path: impl Into<&Path>, pattern: &Regex) -> IoResu
     }
 }
 
+async fn search_it(reader: impl Read, pattern: &Regex) {}
+
 async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<String> {
     let (sender, receiver) = channel();
 
@@ -100,11 +103,10 @@ async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<St
             if dir_child.is_file().await {
                 let task = async_std::task::spawn(async move {
                     let dir_child_path: &Path = &dir_child;
-                    let child_search_result = search_file(dir_child_path, &pattern)
-                        .await
-                        .expect("search failed");
 
-                    child_search_result
+                    search_file(dir_child_path, &pattern)
+                        .await
+                        .expect("search failed")
                 });
 
                 spawned_tasks.push(task);
@@ -132,20 +134,20 @@ async fn search_file(file_path: impl Into<&Path>, pattern: &Regex) -> IoResult<S
 
     let content = fs::read_to_string(file_path).await?;
 
+    // TODO: implement buffered reading to minimize memory
     if file_size_bytes > BIG_FILE_PAR_SEARCH_LIMIT_BYTES {
-        search_chunk(content.lines(), pattern).await
+        // TODO: split file further
+        search_chunk(&content, pattern).await
     } else {
-        let content = Arc::new(content);
-
-        Ok("hello hello".to_string())
+        // Search the whole file
+        search_chunk(&content, pattern).await
     }
 }
 
-// async fn search_chunk(chunk: &[&str], pattern: &Regex) -> IoResult<String> {
-async fn search_chunk(chunk: impl Iterator<Item = &str>, pattern: &Regex) -> IoResult<String> {
+async fn search_chunk(chunk: &str, pattern: &Regex) -> IoResult<String> {
     let mut result = String::new();
 
-    for line in chunk {
+    for line in chunk.lines() {
         if pattern.is_match(line) {
             result.push_str(line);
             result.push('\n');
