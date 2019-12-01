@@ -51,8 +51,14 @@ async fn main() -> IoResult<()> {
         dbg!("Targets: {:?}", &targets);
     }
 
-    let regex = Regex::new(&user_input.search_pattern)
-        .unwrap_or_else(|_| panic!("Invalid search expression: {}", &user_input.search_pattern));
+    let regex = if user_input.case_insensitive {
+        let pattern = format!("(?i){}", user_input.search_pattern);
+        Regex::new(&pattern)
+            .unwrap_or_else(|_| panic!("Invalid search expression: {}", &user_input.search_pattern))
+    } else {
+        Regex::new(&user_input.search_pattern)
+            .unwrap_or_else(|_| panic!("Invalid search expression: {}", &user_input.search_pattern))
+    };
 
     for target in targets {
         let path_buf: PathBuf = target.into();
