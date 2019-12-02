@@ -51,12 +51,22 @@ async fn main() -> IoResult<()> {
         dbg!("Targets: {:?}", &targets);
     }
 
-    let regex = if user_input.case_insensitive {
-        let pattern = format!("(?i){}", user_input.search_pattern);
+    let config_pattern = {
+        let case_sensitive = if user_input.case_insensitive {
+            "(?i)"
+        } else {
+            ""
+        };
+
+        let whole_word_match = if user_input.whole_word { "\\b" } else { "" };
+
+        format!("{}{}", case_sensitive, whole_word_match)
+    };
+
+    let regex = {
+        let pattern = format!("{}{}", config_pattern, user_input.search_pattern);
+
         Regex::new(&pattern)
-            .unwrap_or_else(|_| panic!("Invalid search expression: {}", &user_input.search_pattern))
-    } else {
-        Regex::new(&user_input.search_pattern)
             .unwrap_or_else(|_| panic!("Invalid search expression: {}", &user_input.search_pattern))
     };
 
