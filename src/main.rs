@@ -15,6 +15,7 @@
 )]
 
 mod arg_parse;
+mod search_target;
 
 use async_std::fs;
 use async_std::io::Result as IoResult;
@@ -28,41 +29,39 @@ const BIG_FILE_PAR_SEARCH_LIMIT_BYTES: u64 = 10_000_000;
 
 #[async_std::main]
 async fn main() -> IoResult<()> {
-    let args = std::env::args();
-
-    let user_input = arg_parse::capture_input(args);
+    let user_input = {
+        let args = std::env::args();
+        arg_parse::capture_input(args)
+    };
 
     if user_input.debug_enabled {
         dbg!(&user_input);
     }
 
-    // TODO: lots of unnecessary copying happening below... there's certainly a better way.
-    let targets = if user_input.search_targets.is_empty() {
-        // By default, if no target is provided, search recursively from the current dir.
-        let cur_dir_canonical = std::env::current_dir()?.canonicalize()?;
-
-        // TODO: might only need to do "." or "./" for current path, and Regex takes care of it
-        vec![cur_dir_canonical.to_owned()]
-    } else {
-        user_input.search_targets.clone()
-    };
-
     if user_input.debug_enabled {
-        dbg!("Targets: {:?}", &targets);
+        dbg!("Targets: {:?}", &user_input.search_targets);
     }
 
-    let regex = if user_input.case_insensitive {
-        let pattern = format!("(?i){}", user_input.search_pattern);
-        Regex::new(&pattern)
-            .unwrap_or_else(|_| panic!("Invalid search expression: {}", &user_input.search_pattern))
-    } else {
-        Regex::new(&user_input.search_pattern)
-            .unwrap_or_else(|_| panic!("Invalid search expression: {}", &user_input.search_pattern))
+    let pattern = {
+        let case_insensitive_match = if user_input.case_insensitive {
+            "(?i)"
+        } else {
+            ""
+        };
+
+        let whole_word_match = if user_input.whole_word { "\\b" } else { "" };
+
+        format!(
+            "{}{}{}",
+            whole_word_match, case_insensitive_match, user_input.search_pattern
+        )
     };
 
-    for target in targets {
-        let path_buf: PathBuf = target.into();
-        let path: &Path = &path_buf;
+    let regex = Regex::new(&pattern)
+        .unwrap_or_else(|_| panic!("Invalid search expression: {}", &user_input.search_pattern));
+
+    for target in user_input.search_targets {
+        let path: &Path = &target;
 
         let search_result = search_target(path, &regex).await?;
 
