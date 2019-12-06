@@ -23,6 +23,7 @@ use async_std::io::{stdin, BufReader, Read};
 use async_std::path::{Path, PathBuf};
 use async_std::prelude::*;
 use regex::Regex;
+use search_target::SearchTarget;
 use std::sync::mpsc::channel;
 
 const BIG_FILE_PAR_SEARCH_LIMIT_BYTES: u64 = 10_000_000;
@@ -60,12 +61,17 @@ async fn main() -> IoResult<()> {
     let regex = Regex::new(&pattern)
         .unwrap_or_else(|_| panic!("Invalid search expression: {}", &user_input.search_pattern));
 
-    for target in user_input.search_targets {
-        let path: &Path = &target;
+    if let SearchTarget::Stdin = user_input.search_target {
+        let reader = BufReader::new(async_std::io::stdin());
+        search_it(reader, &regex).await;
+    } else {
+        for target in user_input.search_targets {
+            let path: &Path = &target;
 
-        let search_result = search_target(path, &regex).await?;
+            let search_result = search_target(path, &regex).await?;
 
-        println!("{}", search_result);
+            println!("{}", search_result);
+        }
     }
 
     Ok(())
@@ -87,7 +93,53 @@ async fn search_target(target_path: impl Into<&Path>, pattern: &Regex) -> IoResu
     }
 }
 
-async fn search_it(reader: impl Read, pattern: &Regex) {}
+async fn search_it<R>(mut reader: R, pattern: &Regex)
+where
+    R: Read + std::marker::Unpin,
+{
+    // // Always the last line read, probably only the first fragment of it.
+    let mut hanging_line = String::new();
+    let mut buf = vec![0u8; 1024];
+
+    while let Ok(r) = reader.read(&mut buf).await {
+        if r == 0 {
+            return;
+        }
+
+        let drained = buf;
+        buf = vec![0u8; 1024];
+        let as_str = String::from_utf8_lossy(&drained[..r]);
+
+        let lines_in_chunk = as_str.lines().collect::<Vec<_>>();
+
+        if lines_in_chunk.len() == 1 {
+            // only one line indicates we didn't hit a newline yet
+            hanging_line.push_str(lines_in_chunk[0]);
+        } else if lines_in_chunk.len() > 1 {
+            // There are multiple lines, so the first line + hanging = a complete line
+            // This is a full line now:
+            hanging_line.push_str(lines_in_chunk[0]);
+
+            
+        }
+
+        let first_line = lines_in_chunk.next();
+
+        println!("{}", &as_str);
+    }
+}
+
+// fn read_smarter() {
+//     let mut byte_stream = reader.bytes();
+//     let mut current_line = String::new();
+
+//     while let Some(b) = byte_stream.next().await {
+//         match b {
+//             '\n' => {}
+//             _ => {}
+//         }
+//     }
+// }
 
 async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<String> {
     let (sender, receiver) = channel();

@@ -43,6 +43,10 @@ pub(crate) fn capture_input(args: impl Iterator<Item = String>) -> UserInput {
     // Finally, the file(s)/directory(ies) to search.
     user_input.search_targets = args.map(|a| a.into()).collect();
 
+    if is_stdin_provided() {
+        user_input.search_target = SearchTarget::Stdin;
+    }
+
     user_input
 }
 
