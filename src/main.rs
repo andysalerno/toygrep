@@ -100,23 +100,40 @@ where
     let mut result = String::new();
 
     // The buffer that the reader will populate.
-    let mut buf = vec![0u8; 1024];
+    const BUF_SIZE: usize = 80000;
+    let mut buf = vec![0u8; BUF_SIZE];
 
     // While reading, this will hold any hanging line that exceeds
     // the buffer boundaries.
     let mut hanging_line = String::new();
 
-    reader.for_byte_line()
+    loop {
+        let bytes_read = reader
+            .read(&mut buf)
+            .await
+            .expect("Failed to read bytes from reader.");
 
-    while let Ok(r) = reader.read(&mut buf).await {
-        if r == 0 {
+        if bytes_read == 0 {
             break;
         }
 
         let mut drained = buf;
-        buf = vec![0u8; 1024];
+        buf = vec![0u8; BUF_SIZE];
 
-        drained.truncate(r);
+        drained.truncate(bytes_read);
+
+        while !is_byte_single_unicode_char(*drained.last().unwrap()) {
+            // read bytes until we find something single char
+            let mut buf = vec![0u8; BUF_SIZE];
+            let bytes_read = reader.read(&mut buf).await.expect("Failed to read bytes from reader.");
+
+            if bytes_read == 0 {
+                break;
+            }
+
+            buf.truncate(bytes_read);
+            drained.extend(buf);
+        }
 
         // Interpret this chunk from the buffer as a string.
         let as_str = String::from_utf8(drained).expect("Couldn't parse input as utf8.");
@@ -253,4 +270,11 @@ async fn file_size_bytes(file_path: &Path) -> IoResult<u64> {
     let metadata = fs::metadata(file_path).await?;
 
     Ok(metadata.len())
+}
+
+fn is_byte_single_unicode_char(byte: u8) -> bool {
+    // Bytes like: 0xxxxxxx
+    // are ascii characters in UTF-8,
+    // and take up a single byte.
+    byte & 0b10000000u8 == 0b00000000u8
 }
