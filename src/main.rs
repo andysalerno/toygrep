@@ -97,36 +97,71 @@ async fn search_it<R>(mut reader: R, pattern: &Regex)
 where
     R: Read + std::marker::Unpin,
 {
-    // // Always the last line read, probably only the first fragment of it.
-    let mut hanging_line = String::new();
+    let mut result = String::new();
+
+    // The buffer that the reader will populate.
     let mut buf = vec![0u8; 1024];
+
+    // While reading, this will hold any hanging line that exceeds
+    // the buffer boundaries.
+    let mut hanging_line = String::new();
+
+    reader.for_byte_line()
 
     while let Ok(r) = reader.read(&mut buf).await {
         if r == 0 {
-            return;
+            break;
         }
 
-        let drained = buf;
+        let mut drained = buf;
         buf = vec![0u8; 1024];
-        let as_str = String::from_utf8_lossy(&drained[..r]);
 
+        drained.truncate(r);
+
+        // Interpret this chunk from the buffer as a string.
+        let as_str = String::from_utf8(drained).expect("Couldn't parse input as utf8.");
+
+        // Split the string by lines.
         let lines_in_chunk = as_str.lines().collect::<Vec<_>>();
 
         if lines_in_chunk.len() == 1 {
-            // only one line indicates we didn't hit a newline yet
-            hanging_line.push_str(lines_in_chunk[0]);
+            // Only one line indicates we didn't hit a newline yet
+            hanging_line.push_str(lines_in_chunk.first().unwrap());
         } else if lines_in_chunk.len() > 1 {
             // There are multiple lines, so the first line + hanging = a complete line
             // This is a full line now:
-            hanging_line.push_str(lines_in_chunk[0]);
+            hanging_line.push_str(lines_in_chunk.first().unwrap());
 
-            
+            if pattern.is_match(&hanging_line) {
+                result.push_str(&hanging_line);
+                result.push('\n');
+            }
+            hanging_line.clear();
+
+            // All lines but first and last must be "full" lines,
+            // so we can try to match them directly.
+            for line in &lines_in_chunk[1..lines_in_chunk.len() - 1] {
+                if pattern.is_match(line) {
+                    result.push_str(line);
+                    result.push('\n');
+                }
+            }
+
+            // Last line is possibly not complete, so it becomes the hanging line.
+            hanging_line.push_str(
+                lines_in_chunk
+                    .last()
+                    .expect("Slice must have had elements."),
+            );
         }
-
-        let first_line = lines_in_chunk.next();
-
-        println!("{}", &as_str);
     }
+
+    if pattern.is_match(&hanging_line) {
+        result.push_str(&hanging_line);
+        result.push('\n');
+    }
+
+    println!("{}", result);
 }
 
 // fn read_smarter() {
