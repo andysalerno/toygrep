@@ -17,7 +17,7 @@
 mod arg_parse;
 mod search_target;
 
-use async_std::fs;
+use async_std::fs::{self, File};
 use async_std::io::Result as IoResult;
 use async_std::io::{stdin, BufReader, Read};
 use async_std::path::{Path, PathBuf};
@@ -93,7 +93,7 @@ async fn search_target(target_path: impl Into<&Path>, pattern: &Regex) -> IoResu
     }
 }
 
-async fn search_via_reader<R>(mut reader: R, pattern: &Regex)
+async fn search_via_reader<R>(mut reader: R, pattern: &Regex) -> String
 where
     R: Read + std::marker::Unpin,
 {
@@ -181,7 +181,7 @@ where
         result.push('\n');
     }
 
-    println!("{}", result);
+    result
 }
 
 async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<String> {
@@ -229,33 +229,42 @@ async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<St
 }
 
 async fn search_file(file_path: impl Into<&Path>, pattern: &Regex) -> IoResult<String> {
-    let file_path = file_path.into();
-    let file_size_bytes = file_size_bytes(file_path).await?;
+    let file = File::open(file_path.into()).await?;
+    let reader = BufReader::new(file);
 
-    let content = fs::read_to_string(file_path).await?;
-
-    // TODO: implement buffered reading to minimize memory
-    if file_size_bytes > BIG_FILE_PAR_SEARCH_LIMIT_BYTES {
-        // TODO: split file further
-        search_chunk(&content, pattern).await
-    } else {
-        // Search the whole file
-        search_chunk(&content, pattern).await
-    }
-}
-
-async fn search_chunk(chunk: &str, pattern: &Regex) -> IoResult<String> {
-    let mut result = String::new();
-
-    for line in chunk.lines() {
-        if pattern.is_match(line) {
-            result.push_str(line);
-            result.push('\n');
-        }
-    }
+    let result = search_via_reader(reader, pattern).await;
 
     Ok(result)
 }
+
+// async fn search_file(file_path: impl Into<&Path>, pattern: &Regex) -> IoResult<String> {
+//     let file_path = file_path.into();
+//     let file_size_bytes = file_size_bytes(file_path).await?;
+
+//     let content = fs::read_to_string(file_path).await?;
+
+//     // TODO: implement buffered reading to minimize memory
+//     if file_size_bytes > BIG_FILE_PAR_SEARCH_LIMIT_BYTES {
+//         // TODO: split file further
+//         search_chunk(&content, pattern).await
+//     } else {
+//         // Search the whole file
+//         search_chunk(&content, pattern).await
+//     }
+// }
+
+// async fn search_chunk(chunk: &str, pattern: &Regex) -> IoResult<String> {
+//     let mut result = String::new();
+
+//     for line in chunk.lines() {
+//         if pattern.is_match(line) {
+//             result.push_str(line);
+//             result.push('\n');
+//         }
+//     }
+
+//     Ok(result)
+// }
 
 async fn file_size_bytes(file_path: &Path) -> IoResult<u64> {
     let metadata = fs::metadata(file_path).await?;
