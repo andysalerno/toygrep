@@ -63,7 +63,7 @@ async fn main() -> IoResult<()> {
 
     if let SearchTarget::Stdin = user_input.search_target {
         let reader = BufReader::new(async_std::io::stdin());
-        search_it(reader, &regex).await;
+        search_via_reader(reader, &regex).await;
     } else {
         for target in user_input.search_targets {
             let path: &Path = &target;
@@ -93,14 +93,14 @@ async fn search_target(target_path: impl Into<&Path>, pattern: &Regex) -> IoResu
     }
 }
 
-async fn search_it<R>(mut reader: R, pattern: &Regex)
+async fn search_via_reader<R>(mut reader: R, pattern: &Regex)
 where
     R: Read + std::marker::Unpin,
 {
     let mut result = String::new();
 
     // The buffer that the reader will populate.
-    const BUF_SIZE: usize = 80000;
+    const BUF_SIZE: usize = 80_000;
     let mut buf = vec![0u8; BUF_SIZE];
 
     // While reading, this will hold any hanging line that exceeds
@@ -124,15 +124,18 @@ where
 
         while !is_byte_single_unicode_char(*drained.last().unwrap()) {
             // read bytes until we find something single char
-            let mut buf = vec![0u8; BUF_SIZE];
-            let bytes_read = reader.read(&mut buf).await.expect("Failed to read bytes from reader.");
+            let mut mini_buf = vec![0u8; 256];
+            let bytes_read = reader
+                .read(&mut mini_buf)
+                .await
+                .expect("Failed to read bytes from reader.");
 
             if bytes_read == 0 {
                 break;
             }
 
             buf.truncate(bytes_read);
-            drained.extend(buf);
+            drained.extend(mini_buf);
         }
 
         // Interpret this chunk from the buffer as a string.
@@ -180,18 +183,6 @@ where
 
     println!("{}", result);
 }
-
-// fn read_smarter() {
-//     let mut byte_stream = reader.bytes();
-//     let mut current_line = String::new();
-
-//     while let Some(b) = byte_stream.next().await {
-//         match b {
-//             '\n' => {}
-//             _ => {}
-//         }
-//     }
-// }
 
 async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<String> {
     let (sender, receiver) = channel();
