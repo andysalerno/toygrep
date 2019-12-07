@@ -19,14 +19,12 @@ mod search_target;
 
 use async_std::fs::{self, File};
 use async_std::io::Result as IoResult;
-use async_std::io::{stdin, BufReader, Read};
-use async_std::path::{Path, PathBuf};
+use async_std::io::{BufReader, Read};
+use async_std::path::{Path};
 use async_std::prelude::*;
 use regex::Regex;
 use search_target::SearchTarget;
 use std::sync::mpsc::channel;
-
-const BIG_FILE_PAR_SEARCH_LIMIT_BYTES: u64 = 10_000_000;
 
 #[async_std::main]
 async fn main() -> IoResult<()> {
@@ -91,6 +89,59 @@ async fn search_target(target_path: impl Into<&Path>, pattern: &Regex) -> IoResu
             target_path.display()
         );
     }
+}
+
+async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<String> {
+    let (sender, receiver) = channel();
+
+    sender
+        .send(directory_path.to_path_buf())
+        .expect("Failure establishing sync channel.");
+
+    let mut spawned_tasks = Vec::new();
+
+    for dir_path in receiver.try_iter() {
+        let mut dir_children = fs::read_dir(dir_path).await?;
+
+        while let Some(dir_child) = dir_children.next().await {
+            let dir_child = dir_child?.path();
+            let pattern = pattern.clone();
+
+            if dir_child.is_file().await {
+                let task = async_std::task::spawn(async move {
+                    let dir_child_path: &Path = &dir_child;
+
+                    search_file(dir_child_path, &pattern)
+                        .await
+                        .expect("search failed")
+                });
+
+                spawned_tasks.push(task);
+            } else if dir_child.is_dir().await {
+                sender
+                    .send(dir_child)
+                    .expect("Failure sending over sync channel.");
+            }
+        }
+    }
+
+    let mut search_result = String::new();
+
+    for task in spawned_tasks {
+        let mut result = task.await;
+        search_result.extend(result.drain(..));
+    }
+
+    Ok(search_result)
+}
+
+async fn search_file(file_path: impl Into<&Path>, pattern: &Regex) -> IoResult<String> {
+    let file = File::open(file_path.into()).await?;
+    let reader = BufReader::new(file);
+
+    let result = search_via_reader(reader, pattern).await;
+
+    Ok(result)
 }
 
 async fn search_via_reader<R>(mut reader: R, pattern: &Regex) -> String
@@ -182,94 +233,6 @@ where
     }
 
     result
-}
-
-async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<String> {
-    let (sender, receiver) = channel();
-
-    sender
-        .send(directory_path.to_path_buf())
-        .expect("Failure establishing sync channel.");
-
-    let mut spawned_tasks = Vec::new();
-
-    for dir_path in receiver.try_iter() {
-        let mut dir_children = fs::read_dir(dir_path).await?;
-
-        while let Some(dir_child) = dir_children.next().await {
-            let dir_child = dir_child?.path();
-            let pattern = pattern.clone();
-
-            if dir_child.is_file().await {
-                let task = async_std::task::spawn(async move {
-                    let dir_child_path: &Path = &dir_child;
-
-                    search_file(dir_child_path, &pattern)
-                        .await
-                        .expect("search failed")
-                });
-
-                spawned_tasks.push(task);
-            } else if dir_child.is_dir().await {
-                sender
-                    .send(dir_child)
-                    .expect("Failure sending over sync channel.");
-            }
-        }
-    }
-
-    let mut search_result = String::new();
-
-    for task in spawned_tasks {
-        let mut result = task.await;
-        search_result.extend(result.drain(..));
-    }
-
-    Ok(search_result)
-}
-
-async fn search_file(file_path: impl Into<&Path>, pattern: &Regex) -> IoResult<String> {
-    let file = File::open(file_path.into()).await?;
-    let reader = BufReader::new(file);
-
-    let result = search_via_reader(reader, pattern).await;
-
-    Ok(result)
-}
-
-// async fn search_file(file_path: impl Into<&Path>, pattern: &Regex) -> IoResult<String> {
-//     let file_path = file_path.into();
-//     let file_size_bytes = file_size_bytes(file_path).await?;
-
-//     let content = fs::read_to_string(file_path).await?;
-
-//     // TODO: implement buffered reading to minimize memory
-//     if file_size_bytes > BIG_FILE_PAR_SEARCH_LIMIT_BYTES {
-//         // TODO: split file further
-//         search_chunk(&content, pattern).await
-//     } else {
-//         // Search the whole file
-//         search_chunk(&content, pattern).await
-//     }
-// }
-
-// async fn search_chunk(chunk: &str, pattern: &Regex) -> IoResult<String> {
-//     let mut result = String::new();
-
-//     for line in chunk.lines() {
-//         if pattern.is_match(line) {
-//             result.push_str(line);
-//             result.push('\n');
-//         }
-//     }
-
-//     Ok(result)
-// }
-
-async fn file_size_bytes(file_path: &Path) -> IoResult<u64> {
-    let metadata = fs::metadata(file_path).await?;
-
-    Ok(metadata.len())
 }
 
 fn is_byte_single_unicode_char(byte: u8) -> bool {
