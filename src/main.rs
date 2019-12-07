@@ -15,13 +15,15 @@
 )]
 
 mod arg_parse;
+mod line_buffer;
 mod search_target;
 
 use async_std::fs::{self, File};
 use async_std::io::Result as IoResult;
 use async_std::io::{BufReader, Read};
-use async_std::path::{Path};
+use async_std::path::Path;
 use async_std::prelude::*;
+use line_buffer::LineBuffer;
 use regex::Regex;
 use search_target::SearchTarget;
 use std::sync::mpsc::channel;
@@ -142,6 +144,12 @@ async fn search_file(file_path: impl Into<&Path>, pattern: &Regex) -> IoResult<S
     let result = search_via_reader(reader, pattern).await;
 
     Ok(result)
+}
+async fn search_via_readerx<R>(mut reader: R, pattern: &Regex, buffer: LineBuffer) -> String
+where
+    R: Read + std::marker::Unpin,
+{
+    unimplemented!()
 }
 
 async fn search_via_reader<R>(mut reader: R, pattern: &Regex) -> String
