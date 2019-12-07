@@ -100,7 +100,7 @@ where
     let mut result = String::new();
 
     // The buffer that the reader will populate.
-    const BUF_SIZE: usize = 80_000;
+    const BUF_SIZE: usize = 8_000_000;
     let mut buf = vec![0u8; BUF_SIZE];
 
     // While reading, this will hold any hanging line that exceeds
