@@ -56,14 +56,16 @@ impl LineBuffer {
     /// This is guaranteed to always be at least as large
     /// as the min_capacity value.
     fn next_writable_slice(&mut self) -> &mut [u8] {
-        let writable_len = self.next_writable_len();
+        let writable_len = dbg!(self.next_writable_len());
 
-        if writable_len < self.min_capacity {
-            let diff = self.min_capacity - writable_len;
-            self.buffer.reserve(diff);
+        if writable_len < dbg!(self.min_capacity) {
+            let diff = dbg!(self.min_capacity - writable_len);
+            let cur_len = self.buffer.len();
+            self.buffer.resize(cur_len + diff, 0u8);
         }
 
-        let next_write_pos = self.next_write_pos;
+        let next_write_pos = dbg!(self.next_write_pos);
+        dbg!(self.internal_max_len());
 
         &mut self.internal_full_slice()[next_write_pos..]
     }
@@ -158,14 +160,21 @@ mod test {
 
     #[test]
     fn buffer_grows_when_needs_capacity() {
-        let test_bytes = "This is a simple test.";
+        let test_bytes = "Hello, everyone!!!";
 
         let mut line_buf = LineBuffer::with_min_capacity(16);
 
         let mut writable = line_buf.next_writable_slice();
+        let writable_len = dbg!(writable.len());
 
-        let writable_bytes = &test_bytes[..writable.len()];
+        let writable_bytes = dbg!(&test_bytes[..writable_len]);
 
         write!(writable, "{}", writable_bytes).expect("Failed writing into buffer.");
+        line_buf.record_write_len(writable_len);
+
+        let mut another_writable = line_buf.next_writable_slice();
+        dbg!(another_writable.len());
+        assert!(!another_writable.is_empty());
+        write!(another_writable, "More writing!").expect("Failed writing into buffer.");
     }
 }
