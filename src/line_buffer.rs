@@ -132,11 +132,12 @@ impl<R: Read + Unpin> LineBuffer<R> {
     fn try_drain_resulting_line(&mut self) -> Option<Vec<u8>> {
         if let Some(pos) = self.previous_write_line_end_pos() {
             // TODO: more performant to split the vector here?
-            let mut drained_line = self.buffer.drain(..pos + 1).collect::<Vec<_>>();
+            // Drain the line, including the newline at the end, and pop it off.
+            let mut drained_line = self.buffer.drain(..=pos).collect::<Vec<_>>();
             drained_line.pop();
 
             if let Some((prev_pos, prev_len)) = self.previous_write_pos_len.as_mut() {
-                *prev_len -= pos;
+                *prev_len -= (pos + 1);
                 *prev_pos = 0;
             }
 
@@ -185,6 +186,9 @@ impl<R: Read + Unpin> LineBuffer<R> {
 
             if !has_more {
                 // Nothing left to read, so give back the full content of the buffer
+                dbg!(&self.buffer);
+                dbg!(&self.previous_write_pos_len);
+
                 let last_write_pos_len = self.previous_write_pos_len.unwrap_or((0, 0));
                 let end_pos = last_write_pos_len.0 + last_write_pos_len.1;
                 return self.buffer.drain(..end_pos).collect::<Vec<_>>();
@@ -215,6 +219,29 @@ mod test {
             "Since the min capacity was larger than the amount to be read,
             the internal buffer should not have changed size."
         );
+    }
+
+    #[test]
+    fn next_write_pos_is_correct() {
+        let bytes = vec![0u8; 60];
+
+        let mut small_buf = LineBufferBuilder::new(bytes.as_slice())
+            .with_min_capacity(8)
+            .build();
+
+        let mut big_buff = LineBufferBuilder::new(bytes.as_slice())
+            .with_min_capacity(1024)
+            .build();
+
+        async_std::task::block_on(async {
+            small_buf.perform_single_read().await;
+
+            assert_eq!(8, small_buf.next_write_pos());
+
+            big_buff.perform_single_read().await;
+
+            assert_eq!(60, big_buff.next_write_pos());
+        });
     }
 
     #[test]
@@ -333,7 +360,8 @@ mod test {
 
     #[test]
     fn read_next_line_consumes_remaining_reader() {
-        let bytes_reader = BufReader::new("This is a simple test.".as_bytes());
+        let bytes = "This is a simple test.".as_bytes();
+        let bytes_reader = BufReader::new(bytes);
 
         let mut line_buf = LineBufferBuilder::new(bytes_reader)
             .with_min_capacity(8)
@@ -343,7 +371,7 @@ mod test {
             let line_read = line_buf.read_next_line().await;
 
             assert_eq!(
-                "This is a simple test.".as_bytes(),
+                bytes,
                 line_read.as_slice(),
                 "Expected the read content to match the input content."
             );
@@ -467,7 +495,7 @@ mod test {
         );
 
         let mut line_buf = LineBufferBuilder::new(bytes_reader)
-            .with_min_capacity(1024)
+            .with_min_capacity(128)
             .build();
 
         async_std::task::block_on(async {
