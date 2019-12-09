@@ -129,7 +129,7 @@ impl<R: Read + Unpin> LineBuffer<R> {
             .map(|pos| pos + previous_write_start_pos)
     }
 
-    fn try_drain_resulting_line(&mut self) -> Option<Vec<u8>> {
+    fn try_drain_line(&mut self) -> Option<Vec<u8>> {
         if let Some(pos) = self.previous_write_line_end_pos() {
             // TODO: more performant to split the vector here?
             // Drain the line, including the newline at the end, and pop it off.
@@ -137,7 +137,7 @@ impl<R: Read + Unpin> LineBuffer<R> {
             drained_line.pop();
 
             if let Some((prev_pos, prev_len)) = self.previous_write_pos_len.as_mut() {
-                *prev_len -= (pos + 1);
+                *prev_len -= pos + 1;
                 *prev_pos = 0;
             }
 
@@ -180,7 +180,7 @@ impl<R: Read + Unpin> LineBuffer<R> {
         loop {
             let has_more = self.perform_single_read().await;
 
-            if let Some(line) = self.try_drain_resulting_line() {
+            if let Some(line) = self.try_drain_line() {
                 return line;
             }
 
@@ -413,7 +413,7 @@ mod test {
             line_buf.perform_single_read().await;
 
             let drained = line_buf
-                .try_drain_resulting_line()
+                .try_drain_line()
                 .expect("Must have the given line.");
 
             assert_eq!("This is a simple test.".as_bytes(), drained.as_slice());
@@ -433,7 +433,7 @@ mod test {
         async_std::task::block_on(async {
             line_buf.perform_single_read().await;
 
-            let drained = line_buf.try_drain_resulting_line();
+            let drained = line_buf.try_drain_line();
 
             assert!(
                 drained.is_none(),
@@ -459,7 +459,7 @@ mod test {
             line_buf.perform_single_read().await;
 
             let drained = line_buf
-                .try_drain_resulting_line()
+                .try_drain_line()
                 .expect("Must have the given line.");
 
             assert_eq!("This is a simple test.".as_bytes(), drained.as_slice());
@@ -481,7 +481,7 @@ mod test {
             line_buf.perform_single_read().await;
 
             let drained = line_buf
-                .try_drain_resulting_line()
+                .try_drain_line()
                 .expect("Must have the given line.");
 
             assert_eq!(37, line_buf.content_len());
