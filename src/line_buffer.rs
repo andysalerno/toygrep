@@ -122,6 +122,7 @@ impl<R: Read + Unpin> LineBuffer<R> {
 
     fn try_drain_resulting_line(&mut self) -> Option<Vec<u8>> {
         if let Some(pos) = self.previous_write_line_end_pos() {
+            // TODO: more performant to split the vector here?
             let drained_line = self.buffer.drain(..pos).collect::<Vec<_>>();
 
             Some(drained_line)
@@ -162,10 +163,15 @@ impl<R: Read + Unpin> LineBuffer<R> {
 
     pub async fn read_next_line(&mut self) -> Vec<u8> {
         loop {
-            self.perform_single_read().await;
+            let has_more = self.perform_single_read().await;
 
             if let Some(line) = self.try_drain_resulting_line() {
                 return line;
+            }
+
+            if !has_more {
+                // Nothing left to read, so give back the full content of the buffer
+                return self.buffer.drain(..self.next_write_pos).collect::<Vec<_>>();
             }
         }
     }
