@@ -145,11 +145,14 @@ async fn search_file(file_path: impl Into<&Path>, pattern: &Regex) -> IoResult<S
 
     Ok(result)
 }
-async fn search_via_readerx<R>(mut reader: R, pattern: &Regex, buffer: LineBuffer) -> String
+
+async fn search_via_readerx<R>(mut reader: R, pattern: &Regex, mut buffer: LineBuffer<R>) -> String
 where
     R: Read + std::marker::Unpin,
 {
-    unimplemented!()
+    let _ = buffer.read_next_line().await;
+
+    "testing".to_owned()
 }
 
 async fn search_via_reader<R>(mut reader: R, pattern: &Regex) -> String
