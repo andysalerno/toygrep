@@ -130,17 +130,24 @@ impl<R: Read + Unpin> LineBuffer<R> {
     }
 
     fn try_drain_line(&mut self) -> Option<Vec<u8>> {
-        if let Some(pos) = self.previous_write_line_end_pos() {
+        if let Some(line_break_pos) = self.previous_write_line_end_pos() {
             // TODO: more performant to split the vector here?
             // Drain the line, including the newline at the end, and pop it off.
-            let mut drained_line = self.buffer.drain(..=pos).collect::<Vec<_>>();
+            let mut drained_line = self.buffer.drain(..=line_break_pos).collect::<Vec<_>>();
             drained_line.pop();
 
             if let Some((prev_pos, prev_len)) = self.previous_write_pos_len.as_mut() {
-                *prev_len -= pos + 1;
+                let diff = if line_break_pos > *prev_pos {
+                    line_break_pos - *prev_pos
+                } else {
+                    0
+                };
+
+                *prev_len -= diff;
                 *prev_pos = 0;
             }
 
+            dbg!(&drained_line);
             Some(drained_line)
         } else {
             None
