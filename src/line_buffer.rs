@@ -33,9 +33,7 @@ impl<R: Read + Unpin> LineBufferBuilder<R> {
             min_capacity: self.min_capacity,
             newline_byte: self.newline_byte,
 
-            next_write_pos: 0,
-            previous_write_len: 0,
-            previous_write_pos: 0,
+            previous_write_pos_len: None,
         }
     }
 }
@@ -46,18 +44,11 @@ pub(crate) struct LineBuffer<R: Read> {
     /// will be extended to min_capacity.
     min_capacity: usize,
 
-    /// The index location in the internal buffer where the next
-    /// write will take place.
-    /// I.e., if a writable slice into the buffer is requested,
-    /// the slice will begin at this position in the internal buffer.
-    next_write_pos: usize,
-
-    /// The index location in the internal buffer where the previous write
-    /// ocurred.
-    previous_write_pos: usize,
-
-    /// The length of the previous write in the internal buffer.
-    previous_write_len: usize,
+    /// A tuple of (pos, len) of the previous write,
+    /// where "pos" is the index of the first position of the write,
+    /// and "len" is the count of bytes written.
+    /// None if there has not yet been a write.
+    previous_write_pos_len: Option<(usize, usize)>,
 
     /// The byte that indicates a newline.
     /// Necesssary because this buffer is line-aware.
@@ -74,16 +65,21 @@ pub(crate) struct LineBuffer<R: Read> {
 }
 
 impl<R: Read + Unpin> LineBuffer<R> {
-    fn last_write_end_pos(&self) -> usize {
-        self.previous_write_pos + self.previous_write_len
+    /// The index position where the next write will begin.
+    fn next_write_pos(&self) -> usize {
+        match self.previous_write_pos_len {
+            None => 0,
+            Some((pos, len)) => pos + len,
+        }
     }
 
     /// Returns the length remaining in the buffer for writing.
     fn next_writable_len(&self) -> usize {
         let max_buf_len = self.buffer.len();
-        assert!(self.next_write_pos <= max_buf_len);
+        let next_write_pos = self.next_write_pos();
+        assert!(next_write_pos <= max_buf_len);
 
-        max_buf_len - self.next_write_pos
+        max_buf_len - next_write_pos
     }
 
     /// Returns a mutable slice of the next portion of the buffer
@@ -93,9 +89,18 @@ impl<R: Read + Unpin> LineBuffer<R> {
     fn next_writable_slice(&mut self) -> &mut [u8] {
         self.update_buffer_capacity();
 
-        let next_write_pos = dbg!(self.next_write_pos);
+        let next_write_pos = self.next_write_pos();
 
         &mut self.buffer[next_write_pos..]
+    }
+
+    /// The length of content currently in the buffer.
+    /// E.g., if the buffer was created with capacity for 1024,
+    /// but it has never been written into, this will be 0.
+    /// After a write of 40 bytes, this will be 40.
+    /// After consuming 20 bytes, this will be 20.
+    fn content_len(&self) -> usize {
+        self.next_write_pos()
     }
 
     fn update_buffer_capacity(&mut self) {
@@ -108,22 +113,32 @@ impl<R: Read + Unpin> LineBuffer<R> {
         }
     }
 
-    /// If the most recent call to extend() concluded the line,
+    /// If the most recent write contains a line terminator,
     /// returns the location of the line terminator,
     /// or else None.
     fn previous_write_line_end_pos(&self) -> Option<usize> {
-        let prev_write_slice = self.previous_write_slice();
+        let prev_write_slice = self.last_written_slice();
+        let previous_write_start_pos = self
+            .previous_write_pos_len
+            .expect("Can't execute this until a write has ocurred.")
+            .0;
 
         prev_write_slice
             .iter()
             .position(|&c| c == self.newline_byte)
-            .map(|pos| pos + self.previous_write_pos)
+            .map(|pos| pos + previous_write_start_pos)
     }
 
     fn try_drain_resulting_line(&mut self) -> Option<Vec<u8>> {
         if let Some(pos) = self.previous_write_line_end_pos() {
             // TODO: more performant to split the vector here?
-            let drained_line = self.buffer.drain(..pos).collect::<Vec<_>>();
+            let mut drained_line = self.buffer.drain(..pos + 1).collect::<Vec<_>>();
+            drained_line.pop();
+
+            if let Some((prev_pos, prev_len)) = self.previous_write_pos_len.as_mut() {
+                *prev_len -= pos;
+                *prev_pos = 0;
+            }
 
             Some(drained_line)
         } else {
@@ -133,18 +148,19 @@ impl<R: Read + Unpin> LineBuffer<R> {
 
     /// Returns a slice containing the content
     /// of the most recent write.
-    fn previous_write_slice(&self) -> &[u8] {
-        let pwp = self.previous_write_pos;
-        let ep = pwp + self.previous_write_len;
+    fn last_written_slice(&self) -> &[u8] {
+        let (pos, len) = self
+            .previous_write_pos_len
+            .expect("Attempted to retrieve a slice before any write has ocurred.");
 
-        &self.buffer[pwp..ep]
+        &self.buffer[pos..pos + len]
     }
 
     /// Performs a single read into the buffer.
     /// Returns true if the reader is still not fully consumed.
     async fn perform_single_read(&mut self) -> bool {
         self.update_buffer_capacity();
-        let write_pos = self.next_write_pos;
+        let write_pos = self.next_write_pos();
         let writable_slice = &mut self.buffer[write_pos..];
 
         let written_bytes_count = self
@@ -153,9 +169,7 @@ impl<R: Read + Unpin> LineBuffer<R> {
             .await
             .expect("Failed to read bytes from inner reader.");
 
-        self.previous_write_pos = self.next_write_pos;
-        self.previous_write_len = written_bytes_count;
-        self.next_write_pos = self.previous_write_pos + written_bytes_count;
+        self.previous_write_pos_len = Some((write_pos, written_bytes_count));
 
         // If we filled the entire buffer, the reader probably still has content.
         written_bytes_count == writable_slice.len()
@@ -171,7 +185,9 @@ impl<R: Read + Unpin> LineBuffer<R> {
 
             if !has_more {
                 // Nothing left to read, so give back the full content of the buffer
-                return self.buffer.drain(..self.next_write_pos).collect::<Vec<_>>();
+                let last_write_pos_len = self.previous_write_pos_len.unwrap_or((0, 0));
+                let end_pos = last_write_pos_len.0 + last_write_pos_len.1;
+                return self.buffer.drain(..end_pos).collect::<Vec<_>>();
             }
         }
     }
@@ -264,8 +280,123 @@ mod test {
     }
 
     #[test]
-    fn buffer_completes_after_consuming_entire_reader() {
+    fn last_written_slice_is_correct() {
+        let bytes_reader =
+            BufReader::new("This is a simple test. With extra characters.".as_bytes());
+
+        let mut line_buf = LineBufferBuilder::new(bytes_reader)
+            .with_min_capacity(8)
+            .build();
+
+        async_std::task::block_on(async {
+            // We'll read twice.
+            line_buf.perform_single_read().await;
+            line_buf.perform_single_read().await;
+
+            let slice = line_buf.last_written_slice();
+
+            assert_eq!(
+                "a simple".as_bytes(),
+                slice,
+                "Expected the contents of the last write."
+            );
+        });
+    }
+
+    // #[test]
+    // fn buffer_completes_after_consuming_entire_reader() {
+    //     let bytes_reader = BufReader::new("This is a simple test.".as_bytes());
+
+    //     let mut line_buf = LineBufferBuilder::new(bytes_reader)
+    //         .with_min_capacity(8)
+    //         .build();
+
+    //     async_std::task::block_on(async {
+    //         line_buf.perform_single_read().await;
+
+    //         // Perform another read, which will require growing the buffer.
+    //         line_buf.perform_single_read().await;
+
+    //         // One more read of this size should finish the entirety of the given reader.
+    //         line_buf.perform_single_read().await;
+    //     });
+
+    //     let end_pos = line_buf.last_write_end_pos();
+    //     let buffer_content = &line_buf.buffer[..end_pos];
+
+    //     assert_eq!(
+    //         buffer_content,
+    //         "This is a simple test.".as_bytes(),
+    //         "The content of the buffer should now be the exact value of the input bytes."
+    //     );
+    // }
+
+    #[test]
+    fn read_next_line_consumes_remaining_reader() {
         let bytes_reader = BufReader::new("This is a simple test.".as_bytes());
+
+        let mut line_buf = LineBufferBuilder::new(bytes_reader)
+            .with_min_capacity(8)
+            .build();
+
+        async_std::task::block_on(async {
+            let line_read = line_buf.read_next_line().await;
+
+            assert_eq!(
+                "This is a simple test.".as_bytes(),
+                line_read.as_slice(),
+                "Expected the read content to match the input content."
+            );
+        });
+    }
+
+    #[test]
+    fn read_next_line_reads_line_when_below_capacity() {
+        let bytes_reader = BufReader::new(
+            "This is a simple test.\nAnd this is another line in the test.".as_bytes(),
+        );
+
+        let mut line_buf = LineBufferBuilder::new(bytes_reader)
+            .with_min_capacity(1024)
+            .build();
+
+        async_std::task::block_on(async {
+            let line_read = line_buf.read_next_line().await;
+
+            assert_eq!(
+                line_read.as_slice(),
+                "This is a simple test.".as_bytes(),
+                "Expected the read content to match the input content."
+            );
+        });
+    }
+
+    #[test]
+    fn try_drain_resulting_line_gives_correct_result_when_enough_capacity() {
+        let bytes_reader = BufReader::new(
+            "This is a simple test.\nAnd this is another line in the test.".as_bytes(),
+        );
+
+        let mut line_buf = LineBufferBuilder::new(bytes_reader)
+            .with_min_capacity(1024)
+            .build();
+
+        async_std::task::block_on(async {
+            line_buf.perform_single_read().await;
+
+            let drained = line_buf
+                .try_drain_resulting_line()
+                .expect("Must have the given line.");
+
+            assert_eq!("This is a simple test.".as_bytes(), drained.as_slice());
+        });
+    }
+
+    #[test]
+    fn try_drain_resulting_line_gives_correct_result_when_not_enough_capacity() {
+        let bytes_reader = BufReader::new(
+            "This is a simple test.\nAnd this is another line in the test.".as_bytes(),
+        );
 
         let mut line_buf = LineBufferBuilder::new(bytes_reader)
             .with_min_capacity(8)
@@ -274,66 +405,89 @@ mod test {
         async_std::task::block_on(async {
             line_buf.perform_single_read().await;
 
-            // Perform another read, which will require growing the buffer.
-            line_buf.perform_single_read().await;
+            let drained = line_buf.try_drain_resulting_line();
 
-            // One more read of this size should finish the entirety of the given reader.
-            line_buf.perform_single_read().await;
+            assert!(
+                drained.is_none(),
+                "One read was not enough to provide a full line with this capacity."
+            );
         });
-
-        let end_pos = line_buf.last_write_end_pos();
-        let buffer_content = &line_buf.buffer[..end_pos];
-
-        assert_eq!(
-            buffer_content,
-            "This is a simple test.".as_bytes(),
-            "The content of the buffer should now be the exact value of the input bytes."
-        );
     }
 
-    // #[test]
-    // fn buffer_next_writable_len_decreases_after_write() {
-    //     let test_bytes = "This is a simple test.";
+    #[test]
+    fn try_drain_resulting_line_gives_correct_result_after_multiple_reads() {
+        let bytes_reader = BufReader::new(
+            "This is a simple test.\nAnd this is another line in the test.".as_bytes(),
+        );
 
-    //     let mut line_buf = LineBuffer::with_min_capacity(1024);
+        let mut line_buf = LineBufferBuilder::new(bytes_reader)
+            .with_min_capacity(8)
+            .build();
 
-    //     assert_eq!(1024, line_buf.next_writable_len());
+        async_std::task::block_on(async {
+            // Three reads required to complete the first line.
+            line_buf.perform_single_read().await;
+            line_buf.perform_single_read().await;
+            line_buf.perform_single_read().await;
 
-    //     write!(line_buf.next_writable_slice(), "{}", test_bytes)
-    //         .expect("Failed writing into buffer.");
+            let drained = line_buf
+                .try_drain_resulting_line()
+                .expect("Must have the given line.");
 
-    //     line_buf.record_write_len(dbg!(test_bytes.bytes().len()));
+            assert_eq!("This is a simple test.".as_bytes(), drained.as_slice());
+        });
+    }
 
-    //     assert_eq!(1002, line_buf.next_writable_len(),
-    //         "The remaining writable length should have been decreased by the size of the written data.");
-    // }
+    #[test]
+    fn buffer_has_expected_state_after_draining_line() {
+        let bytes_reader = BufReader::new(
+            "This is a simple test.\nAnd this is another line in the test.".as_bytes(),
+        );
 
-    // #[test]
-    // fn buffer_grows_when_needs_capacity() {
-    //     let test_bytes = "Hello, everyone!!!";
+        let mut line_buf = LineBufferBuilder::new(bytes_reader)
+            .with_min_capacity(1024)
+            .build();
 
-    //     let mut line_buf = LineBuffer::with_min_capacity(16);
+        async_std::task::block_on(async {
+            // Three reads required to complete the first line.
+            line_buf.perform_single_read().await;
 
-    //     let mut writable = line_buf.next_writable_slice();
-    //     let writable_len = writable.len();
+            let drained = line_buf
+                .try_drain_resulting_line()
+                .expect("Must have the given line.");
 
-    //     let writable_bytes = &test_bytes[..writable_len];
+            assert_eq!(37, line_buf.content_len());
+        });
+    }
 
-    //     write!(writable, "{}", writable_bytes).expect("Failed writing into buffer.");
-    //     line_buf.record_write_len(writable_len);
+    #[test]
+    fn read_next_line_reads_multiple_lines() {
+        let bytes_reader = BufReader::new(
+            "This is a simple test.\nAnd this is another line in the test.".as_bytes(),
+        );
 
-    //     let mut another_writable = line_buf.next_writable_slice();
-    //     assert_eq!(16, another_writable.len());
+        let mut line_buf = LineBufferBuilder::new(bytes_reader)
+            .with_min_capacity(1024)
+            .build();
 
-    //     write!(another_writable, "More writing!").expect("Failed writing into buffer.");
-    // }
+        async_std::task::block_on(async {
+            let line_read = line_buf.read_next_line().await;
 
-    // #[test]
-    // fn previous_write_line_end_pos_is_none_when_no_newline() {
-    //     let test_bytes = "Hello, everyone!!!";
+            assert_eq!(
+                "This is a simple test.".as_bytes(),
+                line_read.as_slice(),
+                "Expected the read content to match the input content."
+            );
 
-    //     let mut line_buf = LineBuffer::with_min_capacity(16);
+            let line_read = line_buf.read_next_line().await;
 
-    //     write!(line_buf.)
-    // }
+            dbg!(String::from_utf8(line_read.clone()));
+
+            assert_eq!(
+                "And this is another line in the test.".as_bytes(),
+                line_read.as_slice(),
+                "Expected the read content to match the input content."
+            );
+        });
+    }
 }
