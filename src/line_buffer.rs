@@ -138,7 +138,7 @@ impl<R: Read + Unpin> LineBuffer<R> {
 
             if let Some((prev_pos, prev_len)) = self.previous_write_pos_len.as_mut() {
                 let diff = if line_break_pos > *prev_pos {
-                    line_break_pos - *prev_pos
+                    line_break_pos - *prev_pos + 1
                 } else {
                     0
                 };
@@ -147,7 +147,6 @@ impl<R: Read + Unpin> LineBuffer<R> {
                 *prev_pos = 0;
             }
 
-            dbg!(&drained_line);
             Some(drained_line)
         } else {
             None
@@ -177,7 +176,9 @@ impl<R: Read + Unpin> LineBuffer<R> {
             .await
             .expect("Failed to read bytes from inner reader.");
 
-        self.previous_write_pos_len = Some((write_pos, written_bytes_count));
+        if written_bytes_count > 0 {
+            self.previous_write_pos_len = Some((write_pos, written_bytes_count));
+        }
 
         // If we filled the entire buffer, the reader probably still has content.
         written_bytes_count == writable_slice.len()
@@ -193,10 +194,7 @@ impl<R: Read + Unpin> LineBuffer<R> {
 
             if !has_more {
                 // Nothing left to read, so give back the full content of the buffer
-                dbg!(&self.buffer);
-                dbg!(&self.previous_write_pos_len);
-
-                let last_write_pos_len = self.previous_write_pos_len.unwrap_or((0, 0));
+                let last_write_pos_len = dbg!(self.previous_write_pos_len.unwrap_or((0, 0)));
                 let end_pos = last_write_pos_len.0 + last_write_pos_len.1;
                 return self.buffer.drain(..end_pos).collect::<Vec<_>>();
             }
@@ -480,11 +478,10 @@ mod test {
         );
 
         let mut line_buf = LineBufferBuilder::new(bytes_reader)
-            .with_min_capacity(1024)
+            .with_min_capacity(128)
             .build();
 
         async_std::task::block_on(async {
-            // Three reads required to complete the first line.
             line_buf.perform_single_read().await;
 
             let drained = line_buf
@@ -513,6 +510,8 @@ mod test {
                 line_read.as_slice(),
                 "Expected the read content to match the input content."
             );
+
+            dbg!(&line_buf.previous_write_pos_len);
 
             let line_read = line_buf.read_next_line().await;
 
