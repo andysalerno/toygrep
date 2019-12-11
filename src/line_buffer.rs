@@ -1,6 +1,7 @@
 use async_std::io::prelude::*;
 use async_std::io::{BufReader, Read};
 
+#[derive(Debug)]
 pub enum ReadLineResult {
     ContinueReading(Vec<u8>),
     EndOfFile(Vec<u8>),
@@ -649,6 +650,61 @@ mod test {
             let line = line_buf.read_next_line().await;
 
             line.expect_eof();
+        });
+    }
+
+    #[test]
+    fn buffer_with_stupidly_low_size_still_works() {
+        let bytes_reader = BufReader::new(
+            "This is a simple test.\nAnd this is another line in the test.\nAnd this is one last, third line.".as_bytes(),
+        );
+
+        let mut line_buf = LineBufferBuilder::new(bytes_reader)
+            .with_min_capacity(2)
+            .build();
+
+        async_std::task::block_on(async {
+            let line1 = line_buf.read_next_line().await.expect_continue();
+            let line2 = line_buf.read_next_line().await.expect_continue();
+            let line3 = line_buf.read_next_line().await.expect_eof();
+
+            assert_eq!("This is a simple test.".as_bytes(), line1.as_slice());
+            assert_eq!(
+                "And this is another line in the test.".as_bytes(),
+                line2.as_slice()
+            );
+            assert_eq!(
+                "And this is one last, third line.".as_bytes(),
+                line3.as_slice()
+            );
+        });
+    }
+
+    #[test]
+    fn content_ending_with_newline() {
+        let bytes_reader = BufReader::new(
+            "This is a simple test.\nAnd this is another line in the test.\nAnd this is one last, third line.\n".as_bytes(),
+        );
+
+        let mut line_buf = LineBufferBuilder::new(bytes_reader)
+            .with_min_capacity(16)
+            .build();
+
+        async_std::task::block_on(async {
+            let line1 = line_buf.read_next_line().await.expect_continue();
+            let line2 = line_buf.read_next_line().await.expect_continue();
+            let line3 = line_buf.read_next_line().await.expect_continue();
+            let line4 = line_buf.read_next_line().await.expect_eof();
+
+            assert_eq!("This is a simple test.".as_bytes(), line1.as_slice());
+            assert_eq!(
+                "And this is another line in the test.".as_bytes(),
+                line2.as_slice()
+            );
+            assert_eq!(
+                "And this is one last, third line.".as_bytes(),
+                line3.as_slice()
+            );
         });
     }
 }
