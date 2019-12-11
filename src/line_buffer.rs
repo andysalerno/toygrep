@@ -1,5 +1,5 @@
 use async_std::io::prelude::*;
-use async_std::io::{BufReader, Read};
+use async_std::io::Read;
 
 #[derive(Debug)]
 pub enum ReadLineResult {
@@ -7,14 +7,14 @@ pub enum ReadLineResult {
     EndOfFile(Vec<u8>),
 }
 
-pub(crate) struct LineBufferBuilder<R: Read> {
+pub struct LineBufferBuilder<R: Read> {
     reader: R,
     min_capacity: usize,
     newline_byte: u8,
 }
 
 impl<R: Read + Unpin> LineBufferBuilder<R> {
-    fn new(reader: R) -> Self {
+    pub fn new(reader: R) -> Self {
         LineBufferBuilder {
             reader,
             min_capacity: 1024,
@@ -22,17 +22,17 @@ impl<R: Read + Unpin> LineBufferBuilder<R> {
         }
     }
 
-    fn with_min_capacity(mut self, min_capacity: usize) -> Self {
+    pub fn with_min_capacity(mut self, min_capacity: usize) -> Self {
         self.min_capacity = min_capacity;
         self
     }
 
-    fn with_newline_byte(mut self, newline_byte: u8) -> Self {
+    pub fn with_newline_byte(mut self, newline_byte: u8) -> Self {
         self.newline_byte = newline_byte;
         self
     }
 
-    fn build(self) -> LineBuffer<R> {
+    pub fn build(self) -> LineBuffer<R> {
         LineBuffer {
             buffer: vec![0u8; self.min_capacity],
             reader: self.reader,
@@ -44,7 +44,7 @@ impl<R: Read + Unpin> LineBufferBuilder<R> {
     }
 }
 
-pub(crate) struct LineBuffer<R: Read> {
+pub struct LineBuffer<R: Read> {
     /// Every time the owner wants a writable slice into this buffer,
     /// if there isn't min_capacity room for writing, the internal buffer
     /// will be extended to min_capacity.
@@ -223,6 +223,7 @@ impl<R: Read + Unpin> LineBuffer<R> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use async_std::io::BufReader;
 
     impl ReadLineResult {
         fn expect_continue(self) -> Vec<u8> {

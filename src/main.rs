@@ -23,7 +23,7 @@ use async_std::io::Result as IoResult;
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;
 use async_std::prelude::*;
-use line_buffer::LineBuffer;
+use line_buffer::{LineBuffer, LineBufferBuilder, ReadLineResult};
 use regex::Regex;
 use search_target::SearchTarget;
 use std::sync::mpsc::channel;
@@ -63,7 +63,11 @@ async fn main() -> IoResult<()> {
 
     if let SearchTarget::Stdin = user_input.search_target {
         let reader = BufReader::new(async_std::io::stdin());
-        search_via_reader(reader, &regex).await;
+        let line_buf = LineBufferBuilder::new(reader)
+            .with_min_capacity(8000)
+            .build();
+        let search_result = search_via_reader(&regex, line_buf).await;
+        println!("{}", search_result);
     } else {
         for target in user_input.search_targets {
             let path: &Path = &target;
@@ -141,21 +145,46 @@ async fn search_file(file_path: impl Into<&Path>, pattern: &Regex) -> IoResult<S
     let file = File::open(file_path.into()).await?;
     let reader = BufReader::new(file);
 
-    let result = search_via_reader(reader, pattern).await;
+    let line_buf = LineBufferBuilder::new(reader)
+        .with_min_capacity(8000)
+        .build();
+
+    let result = search_via_reader(pattern, line_buf).await;
 
     Ok(result)
 }
 
-async fn search_via_readerx<R>(mut reader: R, pattern: &Regex, mut buffer: LineBuffer<R>) -> String
+async fn search_via_reader<R>(pattern: &Regex, mut buffer: LineBuffer<R>) -> String
 where
     R: Read + std::marker::Unpin,
 {
-    let _ = buffer.read_next_line().await;
+    // TODO: use with_capacity()
+    let mut result = String::new();
 
-    "testing".to_owned()
+    loop {
+        let line = buffer.read_next_line().await;
+
+        match line {
+            ReadLineResult::ContinueReading(l) => {
+                let as_utf = String::from_utf8(l).expect("Failed parsing to utf8.");
+                if pattern.is_match(&as_utf) {
+                    result.push_str(&as_utf);
+                }
+            }
+            ReadLineResult::EndOfFile(l) => {
+                let as_utf = String::from_utf8(l).expect("Failed parsing to utf8.");
+                if pattern.is_match(&as_utf) {
+                    result.push_str(&as_utf);
+                }
+                break;
+            }
+        }
+    }
+
+    result
 }
 
-async fn search_via_reader<R>(mut reader: R, pattern: &Regex) -> String
+async fn search_via_readerx<R>(mut reader: R, pattern: &Regex) -> String
 where
     R: Read + std::marker::Unpin,
 {
