@@ -77,9 +77,12 @@ impl<R: Read + Unpin> LineBuffer<R> {
     fn next_writable_len(&self) -> usize {
         let max_buf_len = self.buffer.len();
         let next_write_pos = self.next_write_pos();
-        assert!(next_write_pos <= max_buf_len);
 
-        max_buf_len - next_write_pos
+        if next_write_pos > max_buf_len {
+            0
+        } else {
+            max_buf_len - next_write_pos
+        }
     }
 
     /// Returns a mutable slice of the next portion of the buffer
@@ -104,10 +107,10 @@ impl<R: Read + Unpin> LineBuffer<R> {
     }
 
     fn update_buffer_capacity(&mut self) {
-        let writable_len = dbg!(self.next_writable_len());
+        let writable_len = self.next_writable_len();
 
-        if writable_len < dbg!(self.min_capacity) {
-            let diff = dbg!(self.min_capacity - writable_len);
+        if writable_len < self.min_capacity {
+            let diff = self.min_capacity - writable_len;
             let cur_len = self.buffer.len();
             self.buffer.resize(cur_len + diff, 0u8);
         }
@@ -194,7 +197,7 @@ impl<R: Read + Unpin> LineBuffer<R> {
 
             if !has_more {
                 // Nothing left to read, so give back the full content of the buffer
-                let last_write_pos_len = dbg!(self.previous_write_pos_len.unwrap_or((0, 0)));
+                let last_write_pos_len = self.previous_write_pos_len.unwrap_or((0, 0));
                 let end_pos = last_write_pos_len.0 + last_write_pos_len.1;
                 return self.buffer.drain(..end_pos).collect::<Vec<_>>();
             }
@@ -592,6 +595,28 @@ mod test {
                 line_read.as_slice(),
                 "Expected the read content to match the input content."
             );
+        });
+    }
+
+    #[test]
+    fn read_next_line_gives_zero_byte_vec_when_no_more_data() {
+        let bytes_reader = BufReader::new(
+            "This is a simple test.\nAnd this is another line in the test.\nAnd this is one last, third line.".as_bytes(),
+        );
+
+        let mut line_buf = LineBufferBuilder::new(bytes_reader)
+            .with_min_capacity(8)
+            .build();
+
+        async_std::task::block_on(async {
+            let _ = line_buf.read_next_line().await;
+            let _ = line_buf.read_next_line().await;
+            let _ = line_buf.read_next_line().await;
+
+            // This read should give a zero byte response.
+            let line_read = line_buf.read_next_line().await;
+
+            assert!(line_read.is_empty());
         });
     }
 }
