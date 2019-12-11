@@ -493,7 +493,7 @@ mod test {
     }
 
     #[test]
-    fn read_next_line_reads_multiple_lines() {
+    fn read_next_line_reads_two_lines() {
         let bytes_reader = BufReader::new(
             "This is a simple test.\nAnd this is another line in the test.".as_bytes(),
         );
@@ -511,14 +511,84 @@ mod test {
                 "Expected the read content to match the input content."
             );
 
-            dbg!(&line_buf.previous_write_pos_len);
-
             let line_read = line_buf.read_next_line().await;
-
-            dbg!(String::from_utf8(line_read.clone()));
 
             assert_eq!(
                 "And this is another line in the test.".as_bytes(),
+                line_read.as_slice(),
+                "Expected the read content to match the input content."
+            );
+        });
+    }
+
+    #[test]
+    fn read_next_line_reads_three_lines_with_big_buffer() {
+        let bytes_reader = BufReader::new(
+            "This is a simple test.\nAnd this is another line in the test.\nAnd this is one last, third line.".as_bytes(),
+        );
+
+        let mut line_buf = LineBufferBuilder::new(bytes_reader)
+            .with_min_capacity(1024)
+            .build();
+
+        async_std::task::block_on(async {
+            let line_read = line_buf.read_next_line().await;
+
+            assert_eq!(
+                "This is a simple test.".as_bytes(),
+                line_read.as_slice(),
+                "Expected the read content to match the input content."
+            );
+
+            let line_read = line_buf.read_next_line().await;
+
+            assert_eq!(
+                "And this is another line in the test.".as_bytes(),
+                line_read.as_slice(),
+                "Expected the read content to match the input content."
+            );
+
+            let line_read = line_buf.read_next_line().await;
+
+            assert_eq!(
+                "And this is one last, third line.".as_bytes(),
+                line_read.as_slice(),
+                "Expected the read content to match the input content."
+            );
+        });
+    }
+
+    #[test]
+    fn read_next_line_reads_three_lines_with_little_buffer() {
+        let bytes_reader = BufReader::new(
+            "This is a simple test.\nAnd this is another line in the test.\nAnd this is one last, third line.".as_bytes(),
+        );
+
+        let mut line_buf = LineBufferBuilder::new(bytes_reader)
+            .with_min_capacity(8)
+            .build();
+
+        async_std::task::block_on(async {
+            let line_read = line_buf.read_next_line().await;
+
+            assert_eq!(
+                "This is a simple test.".as_bytes(),
+                line_read.as_slice(),
+                "Expected the read content to match the input content."
+            );
+
+            let line_read = line_buf.read_next_line().await;
+
+            assert_eq!(
+                "And this is another line in the test.".as_bytes(),
+                line_read.as_slice(),
+                "Expected the read content to match the input content."
+            );
+
+            let line_read = line_buf.read_next_line().await;
+
+            assert_eq!(
+                "And this is one last, third line.".as_bytes(),
                 line_read.as_slice(),
                 "Expected the read content to match the input content."
             );
