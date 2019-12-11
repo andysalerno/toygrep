@@ -1,6 +1,11 @@
 use async_std::io::prelude::*;
 use async_std::io::{BufReader, Read};
 
+pub enum ReadLineResult {
+    ContinueReading(Vec<u8>),
+    EndOfFile(Vec<u8>),
+}
+
 pub(crate) struct LineBufferBuilder<R: Read> {
     reader: R,
     min_capacity: usize,
@@ -134,26 +139,32 @@ impl<R: Read + Unpin> LineBuffer<R> {
 
     fn try_drain_line(&mut self) -> Option<Vec<u8>> {
         if let Some(line_break_pos) = self.previous_write_line_end_pos() {
-            // TODO: more performant to split the vector here?
-            // Drain the line, including the newline at the end, and pop it off.
-            let mut drained_line = self.buffer.drain(..=line_break_pos).collect::<Vec<_>>();
+            // + 1 to include the newline itself
+            let mut drained_line = self.drain_buf_until(line_break_pos + 1);
+
+            // Pop off the newline, since we don't want it in the result
             drained_line.pop();
-
-            if let Some((prev_pos, prev_len)) = self.previous_write_pos_len.as_mut() {
-                let diff = if line_break_pos > *prev_pos {
-                    line_break_pos - *prev_pos + 1
-                } else {
-                    0
-                };
-
-                *prev_len -= diff;
-                *prev_pos = 0;
-            }
 
             Some(drained_line)
         } else {
             None
         }
+    }
+
+    // Drain the buffer up to (but not including) the given position.
+    fn drain_buf_until(&mut self, pos: usize) -> Vec<u8> {
+        // TODO: more performant to split the vector here?
+        // Drain the line, including the newline at the end, and pop it off.
+        let drained_line = self.buffer.drain(..pos).collect::<Vec<_>>();
+
+        if let Some((prev_pos, prev_len)) = self.previous_write_pos_len.as_mut() {
+            let diff = if pos > *prev_pos { pos - *prev_pos } else { 0 };
+
+            *prev_len -= diff;
+            *prev_pos = 0;
+        }
+
+        drained_line
     }
 
     /// Returns a slice containing the content
@@ -187,19 +198,22 @@ impl<R: Read + Unpin> LineBuffer<R> {
         written_bytes_count == writable_slice.len()
     }
 
-    pub async fn read_next_line(&mut self) -> Vec<u8> {
+    pub async fn read_next_line(&mut self) -> ReadLineResult {
         loop {
             let has_more = self.perform_single_read().await;
 
             if let Some(line) = self.try_drain_line() {
-                return line;
+                return ReadLineResult::ContinueReading(line);
             }
 
             if !has_more {
                 // Nothing left to read, so give back the full content of the buffer
                 let last_write_pos_len = self.previous_write_pos_len.unwrap_or((0, 0));
                 let end_pos = last_write_pos_len.0 + last_write_pos_len.1;
-                return self.buffer.drain(..end_pos).collect::<Vec<_>>();
+
+                // TODO: also split buffer here, instead of drain, for perf?
+                let drained_content = self.drain_buf_until(end_pos);
+                return ReadLineResult::EndOfFile(drained_content);
             }
         }
     }
@@ -208,6 +222,22 @@ impl<R: Read + Unpin> LineBuffer<R> {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    impl ReadLineResult {
+        fn expect_continue(self) -> Vec<u8> {
+            match self {
+                ReadLineResult::EndOfFile(_) => panic!("Expected ContinueReading"),
+                ReadLineResult::ContinueReading(v) => v,
+            }
+        }
+
+        fn expect_eof(self) -> Vec<u8> {
+            match self {
+                ReadLineResult::ContinueReading(_) => panic!("Expected EndOfFile"),
+                ReadLineResult::EndOfFile(v) => v,
+            }
+        }
+    }
 
     #[test]
     fn buffer_does_not_grow_when_has_capacity() {
@@ -378,11 +408,15 @@ mod test {
         async_std::task::block_on(async {
             let line_read = line_buf.read_next_line().await;
 
-            assert_eq!(
-                bytes,
-                line_read.as_slice(),
-                "Expected the read content to match the input content."
-            );
+            if let ReadLineResult::EndOfFile(line) = line_read {
+                assert_eq!(
+                    bytes,
+                    line.as_slice(),
+                    "Expected the read content to match the input content."
+                );
+            } else {
+                assert!(false, "Expected EndOfFile for the read line result.");
+            }
         });
     }
 
@@ -400,7 +434,7 @@ mod test {
             let line_read = line_buf.read_next_line().await;
 
             assert_eq!(
-                line_read.as_slice(),
+                line_read.expect_continue().as_slice(),
                 "This is a simple test.".as_bytes(),
                 "Expected the read content to match the input content."
             );
@@ -510,7 +544,7 @@ mod test {
 
             assert_eq!(
                 "This is a simple test.".as_bytes(),
-                line_read.as_slice(),
+                line_read.expect_continue().as_slice(),
                 "Expected the read content to match the input content."
             );
 
@@ -518,7 +552,7 @@ mod test {
 
             assert_eq!(
                 "And this is another line in the test.".as_bytes(),
-                line_read.as_slice(),
+                line_read.expect_eof().as_slice(),
                 "Expected the read content to match the input content."
             );
         });
@@ -539,7 +573,7 @@ mod test {
 
             assert_eq!(
                 "This is a simple test.".as_bytes(),
-                line_read.as_slice(),
+                line_read.expect_continue().as_slice(),
                 "Expected the read content to match the input content."
             );
 
@@ -547,7 +581,7 @@ mod test {
 
             assert_eq!(
                 "And this is another line in the test.".as_bytes(),
-                line_read.as_slice(),
+                line_read.expect_continue().as_slice(),
                 "Expected the read content to match the input content."
             );
 
@@ -555,7 +589,7 @@ mod test {
 
             assert_eq!(
                 "And this is one last, third line.".as_bytes(),
-                line_read.as_slice(),
+                line_read.expect_eof().as_slice(),
                 "Expected the read content to match the input content."
             );
         });
@@ -576,7 +610,7 @@ mod test {
 
             assert_eq!(
                 "This is a simple test.".as_bytes(),
-                line_read.as_slice(),
+                line_read.expect_continue().as_slice(),
                 "Expected the read content to match the input content."
             );
 
@@ -584,7 +618,7 @@ mod test {
 
             assert_eq!(
                 "And this is another line in the test.".as_bytes(),
-                line_read.as_slice(),
+                line_read.expect_continue().as_slice(),
                 "Expected the read content to match the input content."
             );
 
@@ -592,7 +626,7 @@ mod test {
 
             assert_eq!(
                 "And this is one last, third line.".as_bytes(),
-                line_read.as_slice(),
+                line_read.expect_eof().as_slice(),
                 "Expected the read content to match the input content."
             );
         });
@@ -611,12 +645,10 @@ mod test {
         async_std::task::block_on(async {
             let _ = line_buf.read_next_line().await;
             let _ = line_buf.read_next_line().await;
-            let _ = line_buf.read_next_line().await;
 
-            // This read should give a zero byte response.
-            let line_read = line_buf.read_next_line().await;
+            let line = line_buf.read_next_line().await;
 
-            assert!(line_read.is_empty());
+            line.expect_eof();
         });
     }
 }
