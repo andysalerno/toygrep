@@ -91,27 +91,6 @@ impl<R: Read + Unpin> LineBuffer<R> {
         }
     }
 
-    /// Returns a mutable slice of the next portion of the buffer
-    /// that is available for writing into.
-    /// This is guaranteed to always be at least as large
-    /// as the min_capacity value.
-    fn next_writable_slice(&mut self) -> &mut [u8] {
-        self.update_buffer_capacity();
-
-        let next_write_pos = self.next_write_pos();
-
-        &mut self.buffer[next_write_pos..]
-    }
-
-    /// The length of content currently in the buffer.
-    /// E.g., if the buffer was created with capacity for 1024,
-    /// but it has never been written into, this will be 0.
-    /// After a write of 40 bytes, this will be 40.
-    /// After consuming 20 bytes, this will be 20.
-    fn content_len(&self) -> usize {
-        self.next_write_pos()
-    }
-
     fn update_buffer_capacity(&mut self) {
         let writable_len = self.next_writable_len();
 
@@ -527,7 +506,7 @@ mod test {
                 .try_drain_line()
                 .expect("Must have the given line.");
 
-            assert_eq!(37, line_buf.content_len());
+            assert_eq!(37, line_buf.next_write_pos());
         });
     }
 
