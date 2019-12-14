@@ -63,7 +63,9 @@ async fn main() -> IoResult<()> {
 
     if let SearchTarget::Stdin = user_input.search_target {
         let reader = BufReader::new(async_std::io::stdin());
-        let line_buf = AsyncLineBufferBuilder::new(reader).build();
+        let line_buf = AsyncLineBufferBuilder::new(reader)
+            .with_initial_capacity(8000)
+            .build();
         let search_result = search_via_reader(&regex, line_buf).await;
         println!("{}", search_result);
     } else {
@@ -156,8 +158,15 @@ where
 {
     // TODO: use with_capacity()
     let mut result = String::new();
-    // result
-    String::new()
+    while let Some(line_bytes) = buffer.read_next_line().await {
+        let as_utf = String::from_utf8(line_bytes).expect("Unable to parse line as utf8.");
+        if pattern.is_match(&as_utf) {
+            result.push_str(&as_utf);
+        }
+    }
+
+    println!("{}", buffer.len());
+    result
 }
 
 async fn search_via_readerx<R>(mut reader: R, pattern: &Regex) -> String

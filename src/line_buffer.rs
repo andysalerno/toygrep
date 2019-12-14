@@ -86,7 +86,8 @@ impl<R: Read + Unpin> AsyncLineBuffer<R> {
     /// Make sure the writable portion of
     /// the buffer is non-empty by growing if necessary.
     fn ensure_capacity(&mut self) {
-        if !self.writable_slice().is_empty() {
+        const MIN_CAPACITY: usize = 8000;
+        if self.writable_slice().len() >= MIN_CAPACITY {
             return;
         }
 
@@ -95,6 +96,8 @@ impl<R: Read + Unpin> AsyncLineBuffer<R> {
             .max_capacity
             .and_then(|m| Some(usize::min(doubled_space, m)))
             .unwrap_or(doubled_space);
+
+        let resize_to = usize::max(MIN_CAPACITY, resize_to);
 
         self.buffer.resize(resize_to, 0u8);
     }
@@ -139,7 +142,7 @@ impl<R: Read + Unpin> AsyncLineBuffer<R> {
         drained_line
     }
 
-    async fn read_next_line(&mut self) -> Option<Vec<u8>> {
+    pub async fn read_next_line(&mut self) -> Option<Vec<u8>> {
         loop {
             if let Some(break_pos) = self.line_break_positions.pop_front() {
                 // We already have a full line in our buffer,
@@ -148,7 +151,7 @@ impl<R: Read + Unpin> AsyncLineBuffer<R> {
                 let mut drained_line = self.drain_to_pos(break_pos + 1);
 
                 // Pop off the line break.
-                drained_line.pop();
+                // drained_line.pop();
 
                 return Some(drained_line);
             }
@@ -170,6 +173,10 @@ impl<R: Read + Unpin> AsyncLineBuffer<R> {
     // #[cfg(test)]
     fn as_string(&self) -> String {
         String::from_utf8(self.buffer.clone()).expect("Could not interpret buffer as a string.")
+    }
+
+    pub fn len(&self) -> usize {
+        self.buffer.len()
     }
 }
 
