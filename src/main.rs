@@ -24,9 +24,10 @@ use async_std::io::Result as IoResult;
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;
 use async_std::prelude::*;
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use search_target::SearchTarget;
 use std::str;
+use std::str::Utf8Error;
 use std::sync::mpsc::channel;
 
 // Two megabyte max memory buffer len.
@@ -40,30 +41,21 @@ async fn main() -> IoResult<()> {
     };
 
     if user_input.debug_enabled {
-        dbg!(&user_input);
-    }
-
-    if user_input.debug_enabled {
         dbg!("Targets: {:?}", &user_input.search_targets);
     }
 
-    let pattern = {
-        let case_insensitive_match = if user_input.case_insensitive {
-            "(?i)"
+    let regex = {
+        let with_whole_word = if user_input.whole_word {
+            format_word_match(user_input.search_pattern)
         } else {
-            ""
+            user_input.search_pattern
         };
 
-        let whole_word_match = if user_input.whole_word { "\\b" } else { "" };
-
-        format!(
-            "{}{}{}",
-            whole_word_match, case_insensitive_match, user_input.search_pattern
-        )
+        RegexBuilder::new(&with_whole_word)
+            .case_insensitive(user_input.case_insensitive)
+            .build()
+            .unwrap_or_else(|_| panic!("Invalid search expression: {}", &with_whole_word))
     };
-
-    let regex = Regex::new(&pattern)
-        .unwrap_or_else(|_| panic!("Invalid search expression: {}", &user_input.search_pattern));
 
     if let SearchTarget::Stdin = user_input.search_target {
         let file_rdr = BufReader::new(async_std::io::stdin());
@@ -73,7 +65,10 @@ async fn main() -> IoResult<()> {
 
         let line_rdr = AsyncLineBufferReader::new(file_rdr, line_buf);
 
-        let search_result = search_via_reader(&regex, line_rdr).await;
+        let search_result = search_via_reader(&regex, line_rdr)
+            .await
+            .unwrap_or_else(|_| panic!("Unable to parse input as utf8."));
+
         println!("{}", search_result);
     } else {
         for target in user_input.search_targets {
@@ -162,12 +157,17 @@ async fn search_file(file_path: impl Into<&Path>, pattern: &Regex) -> IoResult<S
         .build();
     let line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf);
 
-    let result = search_via_reader(pattern, line_buf_rdr).await;
+    let result = search_via_reader(pattern, line_buf_rdr)
+        .await
+        .unwrap_or_else(|_| panic!("Unable to parse line as utf8 in file {:?}", path));
 
     Ok(result)
 }
 
-async fn search_via_reader<R>(pattern: &Regex, mut buffer: AsyncLineBufferReader<R>) -> String
+async fn search_via_reader<R>(
+    pattern: &Regex,
+    mut buffer: AsyncLineBufferReader<R>,
+) -> Result<String, Utf8Error>
 where
     R: Read + std::marker::Unpin,
 {
@@ -175,11 +175,15 @@ where
     let mut result = String::new();
 
     while let Some(line_bytes) = buffer.read_line().await {
-        let as_utf = str::from_utf8(&line_bytes).expect("Unable to parse line as utf8.");
+        let as_utf = str::from_utf8(&line_bytes)?;
         if pattern.is_match(as_utf) {
             result.push_str(as_utf);
         }
     }
 
-    result
+    Ok(result)
+}
+
+fn format_word_match(pattern: String) -> String {
+    format!(r"(?:(?m:^)|\W)({})(?:(?m:$)|\W)", pattern)
 }
