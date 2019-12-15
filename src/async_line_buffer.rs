@@ -111,13 +111,14 @@ impl AsyncLineBuffer {
         // TODO: consider a more "exponential growth" pattern to avoid constant resizes
         if self.writable_buffer().len() < self.min_read_size {
             // TOOD: try this out:
-            // let diff = usize::max(
-            //     self.min_read_size - self.writable_buffer().len(),
-            //     self.buffer.len() * 2,
-            // );
-            let diff = self.min_read_size - self.writable_buffer().len();
+            let diff = usize::max(
+                self.min_read_size - self.writable_buffer().len(),
+                self.buffer.len() * 2,
+            );
+            // let diff = self.min_read_size - self.writable_buffer().len();
             let new_size = self.buffer.len() + diff;
             self.buffer.resize(new_size, 0u8);
+            println!("grew buffer to: {}", new_size);
         }
     }
 

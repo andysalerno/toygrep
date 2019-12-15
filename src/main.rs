@@ -165,7 +165,7 @@ where
     R: Read + std::marker::Unpin,
 {
     // TODO: fiddle with capacity
-    let mut result = String::with_capacity(8000);
+    let mut result = String::new();
 
     while let Some(line_bytes) = buffer.read_line().await {
         let as_utf = str::from_utf8(&line_bytes).expect("Unable to parse line as utf8.");
