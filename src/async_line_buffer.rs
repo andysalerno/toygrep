@@ -442,6 +442,7 @@ mod test {
             let line = reader.read_line().await;
             assert_eq!(None, line);
         });
+    }
 
     #[test]
     fn buffer_macbeth() {
@@ -452,7 +453,8 @@ lord, fie! a soldier, and afeard? What need we
 fear who knows it, when none can call our power to
 account?--Yet who would have thought the old man
 to have had so much blood in him.
-        ".trim();
+        "
+        .trim();
         let bytes_reader = BufReader::new(macbeth.as_bytes());
 
         let line_buf = AsyncLineBufferBuilder::new()
@@ -462,8 +464,37 @@ to have had so much blood in him.
 
         async_std::task::block_on(async {
             let line = reader.read_line().await.unwrap();
-            assert_eq!("Out, damned spot! out, I say!--One: two: why,".as_bytes(),
-            line);
+            assert_eq!(
+                "Out, damned spot! out, I say!--One: two: why,\n".as_bytes(),
+                line
+            );
+
+            let line = reader.read_line().await.unwrap();
+            assert_eq!(
+                "then, 'tis time to do't.--Hell is murky!--Fie, my\n".as_bytes(),
+                line
+            );
+
+            let line = reader.read_line().await.unwrap();
+            assert_eq!(
+                "lord, fie! a soldier, and afeard? What need we\n".as_bytes(),
+                line
+            );
+
+            let line = reader.read_line().await.unwrap();
+            assert_eq!(
+                "fear who knows it, when none can call our power to\n".as_bytes(),
+                line
+            );
+
+            let line = reader.read_line().await.unwrap();
+            assert_eq!(
+                "account?--Yet who would have thought the old man\n".as_bytes(),
+                line
+            );
+
+            let line = reader.read_line().await.unwrap();
+            assert_eq!("to have had so much blood in him.".as_bytes(), line);
         });
     }
 }
