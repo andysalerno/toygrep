@@ -16,15 +16,14 @@
 
 mod arg_parse;
 mod async_line_buffer;
-mod line_buffer;
 mod search_target;
 
+use async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
 use async_std::fs::{self, File};
 use async_std::io::Result as IoResult;
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;
 use async_std::prelude::*;
-use line_buffer::{AsyncLineBuffer, AsyncLineBufferBuilder};
 use regex::Regex;
 use search_target::SearchTarget;
 use std::str;
@@ -64,11 +63,14 @@ async fn main() -> IoResult<()> {
         .unwrap_or_else(|_| panic!("Invalid search expression: {}", &user_input.search_pattern));
 
     if let SearchTarget::Stdin = user_input.search_target {
-        let reader = BufReader::new(async_std::io::stdin());
-        let line_buf = AsyncLineBufferBuilder::new(reader)
-            .with_read_capacity(8000)
+        let file_rdr = BufReader::new(async_std::io::stdin());
+        let line_buf = AsyncLineBufferBuilder::new()
+            .with_minimum_read_size(8000)
             .build();
-        let search_result = search_via_reader(&regex, line_buf).await;
+
+        let line_rdr = AsyncLineBufferReader::new(file_rdr, line_buf);
+
+        let search_result = search_via_reader(&regex, line_rdr).await;
         println!("{}", search_result);
     } else {
         for target in user_input.search_targets {
@@ -145,126 +147,32 @@ async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<St
 
 async fn search_file(file_path: impl Into<&Path>, pattern: &Regex) -> IoResult<String> {
     let file = File::open(file_path.into()).await?;
-    let reader = BufReader::new(file);
+    let rdr = BufReader::new(file);
 
-    let line_buf = AsyncLineBufferBuilder::new(reader).build();
+    // TODO: use min-read-len of the filesize if filesize is relatively low
+    let line_buf = AsyncLineBufferBuilder::new()
+        .with_minimum_read_size(8000)
+        .build();
+    let line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf);
 
-    let result = search_via_reader(pattern, line_buf).await;
+    let result = search_via_reader(pattern, line_buf_rdr).await;
 
     Ok(result)
 }
 
-async fn search_via_reader<R>(pattern: &Regex, mut buffer: AsyncLineBuffer<R>) -> String
+async fn search_via_reader<R>(pattern: &Regex, mut buffer: AsyncLineBufferReader<R>) -> String
 where
     R: Read + std::marker::Unpin,
 {
-    // TODO: use with_capacity()
-    let mut result = String::new();
-    while let Some(line_bytes) = buffer.read_next_line().await {
+    // TODO: fiddle with capacity
+    let mut result = String::with_capacity(8000);
+
+    while let Some(line_bytes) = buffer.read_line().await {
         let as_utf = str::from_utf8(&line_bytes).expect("Unable to parse line as utf8.");
         if pattern.is_match(as_utf) {
             result.push_str(as_utf);
         }
     }
 
-    println!("{}", buffer.len());
     result
-}
-
-async fn search_via_readerx<R>(mut reader: R, pattern: &Regex) -> String
-where
-    R: Read + std::marker::Unpin,
-{
-    let mut result = String::new();
-
-    // The buffer that the reader will populate.
-    const BUF_SIZE: usize = 8_000_000;
-    let mut buf = vec![0u8; BUF_SIZE];
-
-    // While reading, this will hold any hanging line that exceeds
-    // the buffer boundaries.
-    let mut hanging_line = String::new();
-
-    loop {
-        let bytes_read = reader
-            .read(&mut buf)
-            .await
-            .expect("Failed to read bytes from reader.");
-
-        if bytes_read == 0 {
-            break;
-        }
-
-        let mut drained = buf;
-        buf = vec![0u8; BUF_SIZE];
-
-        drained.truncate(bytes_read);
-
-        while !is_byte_single_unicode_char(*drained.last().unwrap()) {
-            // read bytes until we find something single char
-            let mut mini_buf = vec![0u8; 256];
-            let bytes_read = reader
-                .read(&mut mini_buf)
-                .await
-                .expect("Failed to read bytes from reader.");
-
-            if bytes_read == 0 {
-                break;
-            }
-
-            buf.truncate(bytes_read);
-            drained.extend(mini_buf);
-        }
-
-        // Interpret this chunk from the buffer as a string.
-        let as_str = String::from_utf8(drained).expect("Couldn't parse input as utf8.");
-
-        // Split the string by lines.
-        let lines_in_chunk = as_str.lines().collect::<Vec<_>>();
-
-        if lines_in_chunk.len() == 1 {
-            // Only one line indicates we didn't hit a newline yet
-            hanging_line.push_str(lines_in_chunk.first().unwrap());
-        } else if lines_in_chunk.len() > 1 {
-            // There are multiple lines, so the first line + hanging = a complete line
-            // This is a full line now:
-            hanging_line.push_str(lines_in_chunk.first().unwrap());
-
-            if pattern.is_match(&hanging_line) {
-                result.push_str(&hanging_line);
-                result.push('\n');
-            }
-            hanging_line.clear();
-
-            // All lines but first and last must be "full" lines,
-            // so we can try to match them directly.
-            for line in &lines_in_chunk[1..lines_in_chunk.len() - 1] {
-                if pattern.is_match(line) {
-                    result.push_str(line);
-                    result.push('\n');
-                }
-            }
-
-            // Last line is possibly not complete, so it becomes the hanging line.
-            hanging_line.push_str(
-                lines_in_chunk
-                    .last()
-                    .expect("Slice must have had elements."),
-            );
-        }
-    }
-
-    if pattern.is_match(&hanging_line) {
-        result.push_str(&hanging_line);
-        result.push('\n');
-    }
-
-    result
-}
-
-fn is_byte_single_unicode_char(byte: u8) -> bool {
-    // Bytes like: 0xxxxxxx
-    // are ascii characters in UTF-8,
-    // and take up a single byte.
-    byte & 0b10000000u8 == 0b00000000u8
 }

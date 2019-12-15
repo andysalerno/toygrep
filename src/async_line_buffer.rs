@@ -206,7 +206,7 @@ impl AsyncLineBuffer {
 }
 
 #[derive(Debug)]
-struct AsyncLineBufferReader<R>
+pub struct AsyncLineBufferReader<R>
 where
     R: async_std::io::Read + std::marker::Unpin,
 {
