@@ -111,11 +111,6 @@ impl AsyncLineBuffer {
 
         // TODO: consider a more "exponential growth" pattern to avoid constant resizes
         if self.writable_buffer().len() < self.min_read_size {
-            dbg!(
-                "{} is below min read size {}",
-                self.writable_buffer().len(),
-                self.min_read_size
-            );
             let diff = usize::max(
                 self.min_read_size - self.writable_buffer().len(),
                 self.buffer.len() * 2,
@@ -123,7 +118,6 @@ impl AsyncLineBuffer {
             // let diff = self.min_read_size - self.writable_buffer().len();
             let new_size = self.buffer.len() + diff;
             self.buffer.resize(new_size, 0u8);
-            dbg!("grew buffer to: {}", new_size);
         }
     }
 
@@ -155,7 +149,6 @@ impl AsyncLineBuffer {
                 .filter(|&(_, &byte)| byte == self.line_break_byte)
             {
                 let absolute_pos = self.end + idx;
-                dbg!("found newline at abs pos {}", absolute_pos);
                 temp_idxs.push_front(absolute_pos);
             }
             std::mem::swap(&mut temp_idxs, &mut self.line_break_idxs);
@@ -199,7 +192,6 @@ impl AsyncLineBuffer {
     fn roll_to_front(&mut self) {
         if self.start == 0 {
             // Already at the start.
-            dbg!("skipping the roll.");
             return;
         }
 
@@ -210,20 +202,11 @@ impl AsyncLineBuffer {
         let prev_end = self.end;
         self.end -= left_shift_len;
 
-        dbg!("shifting lb idxs left by {} ", left_shift_len);
-        dbg!("state before: {}", &self.line_break_idxs);
         self.line_break_idxs.iter_mut().for_each(|idx| {
             *idx -= left_shift_len;
         });
-        dbg!("state after: {}", &self.line_break_idxs);
 
         self.start = 0;
-
-        dbg!(
-            "{} -> {}",
-            (left_shift_len, prev_end),
-            (self.start, self.end)
-        );
     }
 
     fn written_buffer(&self) -> &[u8] {
@@ -256,19 +239,11 @@ where
     }
 
     pub async fn read_line(&mut self) -> Option<&[u8]> {
-        dbg!("read requested.");
-        dbg!("active buffer: {}", self.line_buffer.active_buf_as_str());
         while self.line_buffer.line_break_idxs.is_empty() {
-            dbg!("no line breaks currently. rolling.");
             self.line_buffer.roll_to_front();
             // There are currently no full lines in the buffer, so fill it up.
             let any_bytes_read = self.line_buffer.fill(&mut self.reader).await;
-            dbg!(
-                "Read from reader into buffer: {}",
-                self.line_buffer.active_buf_as_str()
-            );
             if !any_bytes_read {
-                dbg!("no more bytes read, so consuming the remaining.");
                 // Our reader had nothing left, so if we only have a partial line in the buffer,
                 // we need to return it, since it will never get completed.
                 return self.line_buffer.consume_remaining();
@@ -278,13 +253,7 @@ where
         // At this point, the line buffer is populated
         // with at least one full line (which we consume below), or
         // else it has already been completely exhausted.
-        dbg!("break_idxs: {}", &self.line_buffer.line_break_idxs);
         let consumed_line = self.line_buffer.consume_line();
-        dbg!(
-            "consumed single line: {}",
-            std::str::from_utf8(&consumed_line.unwrap_or(&[]))
-        );
-
         consumed_line
     }
 
@@ -538,10 +507,7 @@ to have had so much blood in him.
             );
 
             let line = reader.read_line().await.unwrap();
-            assert_eq!(
-                "to have had so much blood in him.",
-                std::str::from_utf8(line).unwrap()
-            );
+            assert_eq!("to have had so much blood in him.".as_bytes(), line);
         });
     }
 }
