@@ -1,31 +1,30 @@
-use async_std::io::Read;
 use async_std::prelude::*;
 use std::collections::VecDeque;
 
-pub struct AsyncLineBufferBuilder {
+pub(crate) struct AsyncLineBufferBuilder {
     line_break_byte: u8,
     min_read_size: usize,
 }
 
 impl AsyncLineBufferBuilder {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             line_break_byte: b'\n',
             min_read_size: 4096,
         }
     }
 
-    pub fn with_line_break_byte(mut self, line_break_byte: u8) -> Self {
+    pub(crate) fn with_line_break_byte(mut self, line_break_byte: u8) -> Self {
         self.line_break_byte = line_break_byte;
         self
     }
 
-    pub fn with_minimum_read_size(mut self, min_read_size: usize) -> Self {
+    pub(crate) fn with_minimum_read_size(mut self, min_read_size: usize) -> Self {
         self.min_read_size = min_read_size;
         self
     }
 
-    pub fn build(self) -> AsyncLineBuffer {
+    pub(crate) fn build(self) -> AsyncLineBuffer {
         AsyncLineBuffer {
             buffer: vec![0u8; self.min_read_size],
             line_break_byte: self.line_break_byte,
@@ -48,7 +47,7 @@ impl AsyncLineBufferBuilder {
 /// as the file size (for reasonably sized files)
 /// so only one read from the file will be necessary.
 #[derive(Debug, Default)]
-pub struct AsyncLineBuffer {
+pub(crate) struct AsyncLineBuffer {
     /// The internal buffer.
     buffer: Vec<u8>,
 
@@ -160,8 +159,8 @@ impl AsyncLineBuffer {
     /// by the length of the returned line.
     fn consume_line(&mut self) -> Option<&[u8]> {
         if let Some(line_break_pos) = self.line_break_idxs.pop_back() {
-            // `+ 1` to include  the linebreak itself.
-            let line = &self.buffer[self.start..line_break_pos + 1];
+            // inclusive range to include the linebreak itself.
+            let line = &self.buffer[self.start..=line_break_pos];
             self.start += line.len();
 
             Some(line)
@@ -201,20 +200,10 @@ impl AsyncLineBuffer {
 
         self.start = 0;
     }
-
-    #[cfg(test)]
-    fn written_buffer(&self) -> &[u8] {
-        &self.buffer[self.start..self.end]
-    }
-
-    #[cfg(test)]
-    fn active_buf_as_str(&self) -> &str {
-        std::str::from_utf8(self.written_buffer()).unwrap()
-    }
 }
 
 #[derive(Debug)]
-pub struct AsyncLineBufferReader<R>
+pub(crate) struct AsyncLineBufferReader<R>
 where
     R: async_std::io::Read + std::marker::Unpin,
 {
@@ -226,14 +215,14 @@ impl<R> AsyncLineBufferReader<R>
 where
     R: async_std::io::Read + std::marker::Unpin,
 {
-    pub fn new(reader: R, line_buffer: AsyncLineBuffer) -> Self {
+    pub(crate) fn new(reader: R, line_buffer: AsyncLineBuffer) -> Self {
         Self {
             reader,
             line_buffer,
         }
     }
 
-    pub async fn read_line(&mut self) -> Option<&[u8]> {
+    pub(crate) async fn read_line(&mut self) -> Option<&[u8]> {
         while self.line_buffer.line_break_idxs.is_empty() {
             self.line_buffer.roll_to_front();
             // There are currently no full lines in the buffer, so fill it up.
@@ -248,13 +237,7 @@ where
         // At this point, the line buffer is populated
         // with at least one full line (which we consume below), or
         // else it has already been completely exhausted.
-        let consumed_line = self.line_buffer.consume_line();
-        consumed_line
-    }
-
-    #[cfg(test)]
-    fn line_buffer(&self) -> &AsyncLineBuffer {
-        &self.line_buffer
+        self.line_buffer.consume_line()
     }
 }
 
