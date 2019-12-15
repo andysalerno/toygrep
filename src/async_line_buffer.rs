@@ -202,10 +202,12 @@ impl AsyncLineBuffer {
         self.start = 0;
     }
 
+    #[cfg(test)]
     fn written_buffer(&self) -> &[u8] {
         &self.buffer[self.start..self.end]
     }
 
+    #[cfg(test)]
     fn active_buf_as_str(&self) -> &str {
         std::str::from_utf8(self.written_buffer()).unwrap()
     }
