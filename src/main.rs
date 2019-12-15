@@ -29,6 +29,9 @@ use search_target::SearchTarget;
 use std::str;
 use std::sync::mpsc::channel;
 
+// Two megabyte max memory buffer len.
+const MAX_BUFF_LEN_BYTES: usize = 2_000_000;
+
 #[async_std::main]
 async fn main() -> IoResult<()> {
     let user_input = {
@@ -146,12 +149,16 @@ async fn search_directory(directory_path: &Path, pattern: &Regex) -> IoResult<St
 }
 
 async fn search_file(file_path: impl Into<&Path>, pattern: &Regex) -> IoResult<String> {
-    let file = File::open(file_path.into()).await?;
+    let path = file_path.into();
+    let file = File::open(path).await?;
+    let file_size_bytes = fs::metadata(path).await?.len();
     let rdr = BufReader::new(file);
+
+    let min_read_size = usize::min(file_size_bytes as usize + 512, MAX_BUFF_LEN_BYTES);
 
     // TODO: use min-read-len of the filesize if filesize is relatively low
     let line_buf = AsyncLineBufferBuilder::new()
-        .with_minimum_read_size(8000)
+        .with_minimum_read_size(min_read_size)
         .build();
     let line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf);
 
