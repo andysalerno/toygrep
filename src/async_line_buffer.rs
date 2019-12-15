@@ -100,17 +100,22 @@ impl AsyncLineBuffer {
         &self.buffer[self.end..]
     }
 
-    fn written_buffer(&self) -> &[u8] {
-        &self.buffer[self.start..self.end]
-    }
-
     /// Resize the internal buffer if necessary
     /// to guarantee there is at least `min_read_size`
     /// available for writing to.
     fn ensure_capacity(&mut self) {
+        if self.start == self.end && self.end != 0 {
+            // this is an indication the buffer is closed and no longer active.
+            return;
+        }
+
         // TODO: consider a more "exponential growth" pattern to avoid constant resizes
         if self.writable_buffer().len() < self.min_read_size {
-            // TOOD: try this out:
+            dbg!(
+                "{} is below min read size {}",
+                self.writable_buffer().len(),
+                self.min_read_size
+            );
             let diff = usize::max(
                 self.min_read_size - self.writable_buffer().len(),
                 self.buffer.len() * 2,
@@ -118,7 +123,7 @@ impl AsyncLineBuffer {
             // let diff = self.min_read_size - self.writable_buffer().len();
             let new_size = self.buffer.len() + diff;
             self.buffer.resize(new_size, 0u8);
-            println!("grew buffer to: {}", new_size);
+            dbg!("grew buffer to: {}", new_size);
         }
     }
 
@@ -137,20 +142,20 @@ impl AsyncLineBuffer {
             .expect("Unable to read from reader.");
 
         // Keep track of any newlines we inserted
-        {
+        if bytes_count != 0 {
             let mut temp_idxs = VecDeque::new();
 
             // TODO: bit of a hack -- better way to appease borrow checker?
             // Create in-mem vec or clone instead?
             std::mem::swap(&mut temp_idxs, &mut self.line_break_idxs);
 
-            for (idx, _) in self
-                .writable_buffer()
+            for (idx, _) in self.writable_buffer()[..bytes_count]
                 .iter()
                 .enumerate()
                 .filter(|&(_, &byte)| byte == self.line_break_byte)
             {
                 let absolute_pos = self.end + idx;
+                dbg!("found newline at abs pos {}", absolute_pos);
                 temp_idxs.push_front(absolute_pos);
             }
             std::mem::swap(&mut temp_idxs, &mut self.line_break_idxs);
@@ -192,17 +197,41 @@ impl AsyncLineBuffer {
     /// Clear out the consumed portion of the buffer
     /// by rolling the unconsumed content back to the front.
     fn roll_to_front(&mut self) {
+        if self.start == 0 {
+            // Already at the start.
+            dbg!("skipping the roll.");
+            return;
+        }
+
         self.buffer.copy_within(self.start..self.end, 0);
 
         // TODO - must update all line_break_idx also...
         let left_shift_len = self.start;
+        let prev_end = self.end;
         self.end -= left_shift_len;
 
+        dbg!("shifting lb idxs left by {} ", left_shift_len);
+        dbg!("state before: {}", &self.line_break_idxs);
         self.line_break_idxs.iter_mut().for_each(|idx| {
             *idx -= left_shift_len;
         });
+        dbg!("state after: {}", &self.line_break_idxs);
 
         self.start = 0;
+
+        dbg!(
+            "{} -> {}",
+            (left_shift_len, prev_end),
+            (self.start, self.end)
+        );
+    }
+
+    fn written_buffer(&self) -> &[u8] {
+        &self.buffer[self.start..self.end]
+    }
+
+    fn active_buf_as_str(&self) -> &str {
+        std::str::from_utf8(self.written_buffer()).unwrap()
     }
 }
 
@@ -227,12 +256,19 @@ where
     }
 
     pub async fn read_line(&mut self) -> Option<&[u8]> {
+        dbg!("read requested.");
+        dbg!("active buffer: {}", self.line_buffer.active_buf_as_str());
         while self.line_buffer.line_break_idxs.is_empty() {
+            dbg!("no line breaks currently. rolling.");
+            self.line_buffer.roll_to_front();
             // There are currently no full lines in the buffer, so fill it up.
-            // (It would be more readable to do this in the `else` below,
-            // but unfortunately the borrow checker does not like that...)
             let any_bytes_read = self.line_buffer.fill(&mut self.reader).await;
+            dbg!(
+                "Read from reader into buffer: {}",
+                self.line_buffer.active_buf_as_str()
+            );
             if !any_bytes_read {
+                dbg!("no more bytes read, so consuming the remaining.");
                 // Our reader had nothing left, so if we only have a partial line in the buffer,
                 // we need to return it, since it will never get completed.
                 return self.line_buffer.consume_remaining();
@@ -242,7 +278,14 @@ where
         // At this point, the line buffer is populated
         // with at least one full line (which we consume below), or
         // else it has already been completely exhausted.
-        self.line_buffer.consume_line()
+        dbg!("break_idxs: {}", &self.line_buffer.line_break_idxs);
+        let consumed_line = self.line_buffer.consume_line();
+        dbg!(
+            "consumed single line: {}",
+            std::str::from_utf8(&consumed_line.unwrap_or(&[]))
+        );
+
+        consumed_line
     }
 
     #[cfg(test)]
@@ -495,7 +538,10 @@ to have had so much blood in him.
             );
 
             let line = reader.read_line().await.unwrap();
-            assert_eq!("to have had so much blood in him.".as_bytes(), line);
+            assert_eq!(
+                "to have had so much blood in him.",
+                std::str::from_utf8(line).unwrap()
+            );
         });
     }
 }
