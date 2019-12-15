@@ -109,15 +109,9 @@ impl AsyncLineBuffer {
             return;
         }
 
-        // TODO: consider a more "exponential growth" pattern to avoid constant resizes
-        if self.writable_buffer().len() < self.min_read_size {
-            let diff = usize::max(
-                self.min_read_size - self.writable_buffer().len(),
-                self.buffer.len() * 2,
-            );
-            // let diff = self.min_read_size - self.writable_buffer().len();
-            let new_size = self.buffer.len() + diff;
-            self.buffer.resize(new_size, 0u8);
+        if self.end == self.buffer.len() {
+            let grow_to = self.buffer.len() * 2;
+            self.buffer.resize(grow_to, 0u8);
         }
     }
 
@@ -199,7 +193,6 @@ impl AsyncLineBuffer {
 
         // TODO - must update all line_break_idx also...
         let left_shift_len = self.start;
-        let prev_end = self.end;
         self.end -= left_shift_len;
 
         self.line_break_idxs.iter_mut().for_each(|idx| {
