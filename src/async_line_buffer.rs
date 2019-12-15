@@ -442,5 +442,28 @@ mod test {
             let line = reader.read_line().await;
             assert_eq!(None, line);
         });
+
+    #[test]
+    fn buffer_macbeth() {
+        let macbeth = "
+Out, damned spot! out, I say!--One: two: why,
+then, 'tis time to do't.--Hell is murky!--Fie, my
+lord, fie! a soldier, and afeard? What need we
+fear who knows it, when none can call our power to
+account?--Yet who would have thought the old man
+to have had so much blood in him.
+        ".trim();
+        let bytes_reader = BufReader::new(macbeth.as_bytes());
+
+        let line_buf = AsyncLineBufferBuilder::new()
+            .with_minimum_read_size(64)
+            .build();
+        let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
+
+        async_std::task::block_on(async {
+            let line = reader.read_line().await.unwrap();
+            assert_eq!("Out, damned spot! out, I say!--One: two: why,".as_bytes(),
+            line);
+        });
     }
 }
