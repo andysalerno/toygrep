@@ -1,5 +1,41 @@
+use async_std::io::Read;
 use async_std::prelude::*;
 use std::collections::VecDeque;
+
+pub struct AsyncLineBufferBuilder {
+    line_break_byte: u8,
+    min_read_size: usize,
+}
+
+impl AsyncLineBufferBuilder {
+    pub fn new() -> Self {
+        Self {
+            line_break_byte: b'\n',
+            min_read_size: 4096,
+        }
+    }
+
+    pub fn with_line_break_byte(mut self, line_break_byte: u8) -> Self {
+        self.line_break_byte = line_break_byte;
+        self
+    }
+
+    pub fn with_minimum_read_size(mut self, min_read_size: usize) -> Self {
+        self.min_read_size = min_read_size;
+        self
+    }
+
+    pub fn build(self) -> AsyncLineBuffer {
+        AsyncLineBuffer {
+            buffer: vec![0u8; self.min_read_size],
+            line_break_byte: self.line_break_byte,
+            line_break_idxs: VecDeque::new(),
+            min_read_size: self.min_read_size,
+            start: 0,
+            end: 0,
+        }
+    }
+}
 
 /// Strategy: fill as much as you can,
 ///             then read as much as you can; repeat.
@@ -12,7 +48,7 @@ use std::collections::VecDeque;
 /// as the file size (for reasonably sized files)
 /// so only one read from the file will be necessary.
 #[derive(Debug, Default)]
-struct AsyncLineBuffer {
+pub struct AsyncLineBuffer {
     /// The internal buffer.
     buffer: Vec<u8>,
 
@@ -32,7 +68,7 @@ struct AsyncLineBuffer {
     /// and there is not at least this much free space,
     /// more space will be allocated to guarantee
     /// at least this much free space.
-    minimum_read_size: usize,
+    min_read_size: usize,
 
     /// The index of the first unconsumed byte
     /// in the buffer.
@@ -69,11 +105,17 @@ impl AsyncLineBuffer {
     }
 
     /// Resize the internal buffer if necessary
-    /// to guarantee there is at least `minimum_read_size`
+    /// to guarantee there is at least `min_read_size`
     /// available for writing to.
     fn ensure_capacity(&mut self) {
-        if self.writable_buffer().len() < self.minimum_read_size {
-            let diff = self.minimum_read_size - self.writable_buffer().len();
+        // TODO: consider a more "exponential growth" pattern to avoid constant resizes
+        if self.writable_buffer().len() < self.min_read_size {
+            // TOOD: try this out:
+            // let diff = usize::max(
+            //     self.min_read_size - self.writable_buffer().len(),
+            //     self.buffer.len() * 2,
+            // );
+            let diff = self.min_read_size - self.writable_buffer().len();
             let new_size = self.buffer.len() + diff;
             self.buffer.resize(new_size, 0u8);
         }
@@ -107,7 +149,7 @@ impl AsyncLineBuffer {
                 .enumerate()
                 .filter(|&(_, &byte)| byte == self.line_break_byte)
             {
-                let absolute_pos = self.start + idx;
+                let absolute_pos = self.end + idx;
                 temp_idxs.push_front(absolute_pos);
             }
             std::mem::swap(&mut temp_idxs, &mut self.line_break_idxs);
@@ -125,7 +167,8 @@ impl AsyncLineBuffer {
     /// by the length of the returned line.
     fn consume_line(&mut self) -> Option<&[u8]> {
         if let Some(line_break_pos) = self.line_break_idxs.pop_back() {
-            let line = &self.buffer[self.start..line_break_pos];
+            // `+ 1` to include  the linebreak itself.
+            let line = &self.buffer[self.start..line_break_pos + 1];
             self.start += line.len();
 
             Some(line)
@@ -134,17 +177,35 @@ impl AsyncLineBuffer {
         }
     }
 
+    fn consume_remaining(&mut self) -> Option<&[u8]> {
+        if self.start >= self.end {
+            return None;
+        }
+
+        let remaining = Some(&self.buffer[self.start..self.end]);
+        self.start = self.end;
+
+        remaining
+    }
+
     /// Clear out the consumed portion of the buffer
     /// by rolling the unconsumed content back to the front.
     fn roll_to_front(&mut self) {
         self.buffer.copy_within(self.start..self.end, 0);
 
-        // todo - must update all line_break_idx also...
-        self.end -= self.start;
+        // TODO - must update all line_break_idx also...
+        let left_shift_len = self.start;
+        self.end -= left_shift_len;
+
+        self.line_break_idxs.iter_mut().for_each(|idx| {
+            *idx -= left_shift_len;
+        });
+
         self.start = 0;
     }
 }
 
+#[derive(Debug)]
 struct AsyncLineBufferReader<R>
 where
     R: async_std::io::Read + std::marker::Unpin,
@@ -157,10 +218,10 @@ impl<R> AsyncLineBufferReader<R>
 where
     R: async_std::io::Read + std::marker::Unpin,
 {
-    pub fn new(reader: R) -> Self {
+    pub fn new(reader: R, line_buffer: AsyncLineBuffer) -> Self {
         Self {
             reader,
-            line_buffer: AsyncLineBuffer::default(),
+            line_buffer,
         }
     }
 
@@ -173,7 +234,7 @@ where
             if !any_bytes_read {
                 // Our reader had nothing left, so if we only have a partial line in the buffer,
                 // we need to return it, since it will never get completed.
-                return Some(self.line_buffer.written_buffer());
+                return self.line_buffer.consume_remaining();
             }
         }
 
@@ -182,4 +243,196 @@ where
         // else it has already been completely exhausted.
         self.line_buffer.consume_line()
     }
+
+    #[cfg(test)]
+    fn line_buffer(&self) -> &AsyncLineBuffer {
+        &self.line_buffer
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use async_std::io::BufReader;
+
+    #[test]
+    fn buffer_reads_simple_text_no_linebreak() {
+        let bytes_reader = BufReader::new("This is a simple test.".as_bytes());
+
+        let line_buf = AsyncLineBufferBuilder::new()
+            .with_minimum_read_size(128)
+            .build();
+        let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
+
+        let line = async_std::task::block_on(async { reader.read_line().await });
+
+        assert_eq!(b"This is a simple test.", line.unwrap());
+    }
+
+    #[test]
+    fn buffer_reads_simple_text_one_linebreak() {
+        let bytes_reader =
+            BufReader::new("This is a simple test.\nAnd now it has two lines.".as_bytes());
+
+        let line_buf = AsyncLineBufferBuilder::new()
+            .with_minimum_read_size(128)
+            .build();
+        let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
+
+        let line = async_std::task::block_on(async { reader.read_line().await });
+        assert_eq!(b"This is a simple test.\n", line.unwrap());
+
+        let line = async_std::task::block_on(async { reader.read_line().await });
+        assert_eq!(b"And now it has two lines.", line.unwrap());
+    }
+
+    #[test]
+    fn buffer_reads_simple_text_tiny_buffer() {
+        let bytes_reader = BufReader::new("This is a simple test.".as_bytes());
+
+        let line_buf = AsyncLineBufferBuilder::new()
+            .with_minimum_read_size(1)
+            .build();
+        let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
+
+        let line = async_std::task::block_on(async { reader.read_line().await });
+        assert_eq!(b"This is a simple test.", line.unwrap());
+    }
+
+    #[test]
+    fn buffer_reads_simple_text_two_lines_tiny_buffer() {
+        let bytes_reader =
+            BufReader::new("This is a simple test.\nAnd now it has two lines.".as_bytes());
+
+        let line_buf = AsyncLineBufferBuilder::new()
+            .with_minimum_read_size(1)
+            .build();
+        let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
+
+        let line = async_std::task::block_on(async { reader.read_line().await });
+        assert_eq!(b"This is a simple test.\n", line.unwrap());
+
+        let line = async_std::task::block_on(async { reader.read_line().await });
+        assert_eq!(b"And now it has two lines.", line.unwrap());
+    }
+
+    #[test]
+    fn buffer_gives_none_when_no_more_lines() {
+        let bytes_reader =
+            BufReader::new("This is a simple test.\nAnd now it has two lines.".as_bytes());
+
+        let line_buf = AsyncLineBufferBuilder::new()
+            .with_minimum_read_size(1)
+            .build();
+        let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
+
+        async_std::task::block_on(async {
+            reader.read_line().await;
+            reader.read_line().await;
+
+            let line = reader.read_line().await;
+
+            assert_eq!(
+                None, line,
+                "There were only two lines, and two lines were consumed already, \
+                 so this should give None."
+            );
+        });
+    }
+
+    // #[test]
+    // fn read_next_line_reads_many_lines() {
+    //     let bytes_reader = BufReader::new(
+    //         "Hi.\nTwo lines.\nA billion and one lines.\nMany many,\nmany lines.".as_bytes(),
+    //     );
+
+    //     let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
+    //         .with_read_capacity(8)
+    //         .build();
+
+    //     async_std::task::block_on(async {
+    //         let line_1 = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("Hi.".as_bytes(), line_1.as_slice());
+
+    //         let line_2 = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("Two lines.".as_bytes(), line_2.as_slice());
+
+    //         let line_3 = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("A billion and one lines.".as_bytes(), line_3.as_slice());
+
+    //         let line_4 = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("Many many,".as_bytes(), line_4.as_slice());
+
+    //         let line_5 = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("many lines.".as_bytes(), line_5.as_slice());
+
+    //         let nonexistant = line_buf.read_next_line().await;
+    //         assert!(nonexistant.is_none());
+    //     });
+    // }
+
+    // #[test]
+    // fn read_lines_works_when_capacity_stupid_low() {
+    //     let bytes_reader = BufReader::new("This is a simple line.".as_bytes());
+
+    //     let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
+    //         .with_read_capacity(1)
+    //         .build();
+
+    //     async_std::task::block_on(async {
+    //         let line = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("This is a simple line.".as_bytes(), line.as_slice());
+    //     });
+    // }
+
+    // #[test]
+    // fn read_lines_works_when_capacity_stupid_low_multiple_lines() {
+    //     let bytes_reader = BufReader::new(
+    //         "This is a simple line.\nAnd this is a second line.\nAnd this is a third.".as_bytes(),
+    //     );
+
+    //     let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
+    //         .with_read_capacity(1)
+    //         .build();
+
+    //     async_std::task::block_on(async {
+    //         let line = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("This is a simple line.".as_bytes(), line.as_slice());
+
+    //         let line = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("And this is a second line.".as_bytes(), line.as_slice());
+
+    //         let line = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("And this is a third.".as_bytes(), line.as_slice());
+    //     });
+    // }
+
+    // #[test]
+    // fn read_lines_works_when_capacity_stupid_low_and_lines_stupid_short() {
+    //     let bytes_reader = BufReader::new("T\nh\nis\na\nt\ne\ns\nt\n.".as_bytes());
+
+    //     let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
+    //         .with_read_capacity(1)
+    //         .build();
+
+    //     async_std::task::block_on(async {
+    //         let line = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("T".as_bytes(), line.as_slice());
+
+    //         let line = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("h".as_bytes(), line.as_slice());
+
+    //         let line = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("is".as_bytes(), line.as_slice());
+
+    //         let line = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("a".as_bytes(), line.as_slice());
+
+    //         let line = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("t".as_bytes(), line.as_slice());
+
+    //         let line = line_buf.read_next_line().await.unwrap();
+    //         assert_eq!("e".as_bytes(), line.as_slice());
+    //     });
+    // }
 }
