@@ -7,6 +7,7 @@ pub struct AsyncLineBufferBuilder<R: Read> {
     max_capacity: Option<usize>,
     newline_byte: u8,
     initial_capacity: usize,
+    read_capacity: usize,
 }
 
 impl<R: Read + Unpin> AsyncLineBufferBuilder<R> {
@@ -16,10 +17,11 @@ impl<R: Read + Unpin> AsyncLineBufferBuilder<R> {
             max_capacity: None,
             newline_byte: b'\n',
             initial_capacity: 1024,
+            read_capacity: 1024,
         }
     }
 
-    pub fn with_initial_capacity(mut self, initial_capacity: usize) -> Self {
+    pub fn with_read_capacity(mut self, initial_capacity: usize) -> Self {
         self.initial_capacity = initial_capacity;
         self
     }
@@ -35,6 +37,7 @@ impl<R: Read + Unpin> AsyncLineBufferBuilder<R> {
             line_break_positions: VecDeque::new(),
             reader: self.reader,
             initial_capacity: self.initial_capacity,
+            read_capacity: self.read_capacity,
             max_capacity: self.max_capacity,
             newline_byte: self.newline_byte,
             end: 0,
@@ -58,7 +61,11 @@ pub struct AsyncLineBuffer<R: Read> {
     line_break_positions: VecDeque<usize>,
 
     /// The starting capacity of the buffer.
+    /// (replaced by read_capacity)
     initial_capacity: usize,
+
+    /// The minimal amount of capacity available during a read.
+    read_capacity: usize,
 
     /// The first index in the buffer that is outside the written portion.
     end: usize,
@@ -128,9 +135,9 @@ impl<R: Read + Unpin> AsyncLineBuffer<R> {
     }
 
     fn drain_to_pos(&mut self, pos: usize) -> Vec<u8> {
-        // + 1 to include the line break itself
         let len_pre = self.buffer.len();
         let drained_line = self.buffer.drain(..pos).collect::<Vec<_>>();
+
         let len_post = self.buffer.len();
 
         let diff = len_pre - len_post;
@@ -190,7 +197,7 @@ mod test {
         let bytes_reader = BufReader::new("This is a simple test.".as_bytes());
 
         let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
-            .with_initial_capacity(128)
+            .with_read_capacity(128)
             .build();
 
         async_std::task::block_on(async {
@@ -210,7 +217,7 @@ mod test {
         let bytes_reader = BufReader::new("This is a simple test.".as_bytes());
 
         let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
-            .with_initial_capacity(8)
+            .with_read_capacity(8)
             .build();
 
         async_std::task::block_on(async {
@@ -231,7 +238,7 @@ mod test {
         let bytes_reader = BufReader::new("This is a simple test.".as_bytes());
 
         let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
-            .with_initial_capacity(8)
+            .with_read_capacity(8)
             .build();
 
         async_std::task::block_on(async {
@@ -253,13 +260,11 @@ mod test {
         let bytes_reader = BufReader::new("This is a simple test.".as_bytes());
 
         let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
-            .with_initial_capacity(8)
+            .with_read_capacity(8)
             .build();
 
         async_std::task::block_on(async {
             let line = line_buf.read_next_line().await;
-            dbg!(&line_buf);
-            dbg!(&line);
         });
 
         assert_eq!(
@@ -274,13 +279,11 @@ mod test {
         let bytes_reader = BufReader::new("This is a simple test.".as_bytes());
 
         let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
-            .with_initial_capacity(8)
+            .with_read_capacity(8)
             .build();
 
         async_std::task::block_on(async {
             let line = line_buf.read_next_line().await.unwrap();
-            dbg!(&line_buf);
-            dbg!(&line);
 
             assert_eq!("This is a simple test.".as_bytes(), line.as_slice());
         });
@@ -291,13 +294,11 @@ mod test {
         let bytes_reader = BufReader::new("This is a simple test.".as_bytes());
 
         let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
-            .with_initial_capacity(128)
+            .with_read_capacity(128)
             .build();
 
         async_std::task::block_on(async {
             let line = line_buf.read_next_line().await.unwrap();
-            dbg!(&line_buf);
-            dbg!(&line);
 
             assert_eq!("This is a simple test.".as_bytes(), line.as_slice());
         });
@@ -309,13 +310,11 @@ mod test {
             BufReader::new("This is a simple test.\nAnd this is another line.".as_bytes());
 
         let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
-            .with_initial_capacity(128)
+            .with_read_capacity(128)
             .build();
 
         async_std::task::block_on(async {
             let line = line_buf.read_next_line().await.unwrap();
-            dbg!(&line_buf);
-            dbg!(&line);
 
             assert_eq!("This is a simple test.".as_bytes(), line.as_slice());
         });
@@ -327,14 +326,12 @@ mod test {
             BufReader::new("This is a simple test.\nAnd this is another line.".as_bytes());
 
         let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
-            .with_initial_capacity(128)
+            .with_read_capacity(128)
             .build();
 
         async_std::task::block_on(async {
             let _ = line_buf.read_next_line().await.unwrap();
             let second_line = line_buf.read_next_line().await.unwrap();
-            dbg!(&line_buf);
-            dbg!(&second_line);
 
             assert_eq!(
                 "And this is another line.".as_bytes(),
@@ -350,29 +347,24 @@ mod test {
         );
 
         let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
-            .with_initial_capacity(8)
+            .with_read_capacity(8)
             .build();
 
         async_std::task::block_on(async {
             let line_1 = line_buf.read_next_line().await.unwrap();
             assert_eq!("Hi.".as_bytes(), line_1.as_slice());
-            dbg!(line_buf.as_string());
 
             let line_2 = line_buf.read_next_line().await.unwrap();
             assert_eq!("Two lines.".as_bytes(), line_2.as_slice());
-            dbg!(line_buf.as_string());
 
             let line_3 = line_buf.read_next_line().await.unwrap();
             assert_eq!("A billion and one lines.".as_bytes(), line_3.as_slice());
-            dbg!(line_buf.as_string());
 
             let line_4 = line_buf.read_next_line().await.unwrap();
             assert_eq!("Many many,".as_bytes(), line_4.as_slice());
-            dbg!(line_buf.as_string());
 
             let line_5 = line_buf.read_next_line().await.unwrap();
             assert_eq!("many lines.".as_bytes(), line_5.as_slice());
-            dbg!(line_buf.as_string());
 
             let nonexistant = line_buf.read_next_line().await;
             assert!(nonexistant.is_none());
@@ -384,7 +376,7 @@ mod test {
         let bytes_reader = BufReader::new("This is a simple line.".as_bytes());
 
         let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
-            .with_initial_capacity(1)
+            .with_read_capacity(1)
             .build();
 
         async_std::task::block_on(async {
@@ -400,7 +392,7 @@ mod test {
         );
 
         let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
-            .with_initial_capacity(1)
+            .with_read_capacity(1)
             .build();
 
         async_std::task::block_on(async {
@@ -420,7 +412,7 @@ mod test {
         let bytes_reader = BufReader::new("T\nh\nis\na\nt\ne\ns\nt\n.".as_bytes());
 
         let mut line_buf = AsyncLineBufferBuilder::new(bytes_reader)
-            .with_initial_capacity(1)
+            .with_read_capacity(1)
             .build();
 
         async_std::task::block_on(async {

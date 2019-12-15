@@ -15,6 +15,7 @@
 )]
 
 mod arg_parse;
+mod async_line_buffer;
 mod line_buffer;
 mod search_target;
 
@@ -26,6 +27,7 @@ use async_std::prelude::*;
 use line_buffer::{AsyncLineBuffer, AsyncLineBufferBuilder};
 use regex::Regex;
 use search_target::SearchTarget;
+use std::str;
 use std::sync::mpsc::channel;
 
 #[async_std::main]
@@ -64,7 +66,7 @@ async fn main() -> IoResult<()> {
     if let SearchTarget::Stdin = user_input.search_target {
         let reader = BufReader::new(async_std::io::stdin());
         let line_buf = AsyncLineBufferBuilder::new(reader)
-            .with_initial_capacity(8000)
+            .with_read_capacity(8000)
             .build();
         let search_result = search_via_reader(&regex, line_buf).await;
         println!("{}", search_result);
@@ -159,9 +161,9 @@ where
     // TODO: use with_capacity()
     let mut result = String::new();
     while let Some(line_bytes) = buffer.read_next_line().await {
-        let as_utf = String::from_utf8(line_bytes).expect("Unable to parse line as utf8.");
-        if pattern.is_match(&as_utf) {
-            result.push_str(&as_utf);
+        let as_utf = str::from_utf8(&line_bytes).expect("Unable to parse line as utf8.");
+        if pattern.is_match(as_utf) {
+            result.push_str(as_utf);
         }
     }
 
