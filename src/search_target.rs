@@ -2,7 +2,7 @@ use async_std::path::PathBuf;
 use std::default::Default;
 
 /// Represents the target for search.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum SearchTarget {
     /// Indicates search will be directed against piped standard input.
     Stdin,

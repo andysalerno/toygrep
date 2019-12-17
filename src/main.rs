@@ -34,7 +34,7 @@ use std::sync::mpsc::channel;
 const MAX_BUFF_LEN_BYTES: usize = 2_000_000;
 
 #[async_std::main]
-async fn main() -> IoResult<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let user_input = {
         let args = std::env::args();
         arg_parse::capture_input(args)
@@ -54,10 +54,10 @@ async fn main() -> IoResult<()> {
         RegexBuilder::new(&with_whole_word)
             .case_insensitive(user_input.case_insensitive)
             .build()
-            .unwrap_or_else(|_| panic!("Invalid search expression: {}", &with_whole_word))
+            .unwrap_or_else(|e| panic!("{:?}", e))
     };
 
-    if let SearchTarget::Stdin = user_input.search_target {
+    if user_input.search_target == SearchTarget::Stdin {
         let file_rdr = BufReader::new(async_std::io::stdin());
         let line_buf = AsyncLineBufferBuilder::new()
             .with_minimum_read_size(8000)
@@ -78,7 +78,7 @@ async fn main() -> IoResult<()> {
 
             println!("{}", search_result);
         }
-    }
+    };
 
     Ok(())
 }
