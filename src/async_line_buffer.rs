@@ -245,6 +245,17 @@ where
     }
 
     pub(crate) async fn read_line<'a>(&'a mut self) -> Option<LineResult<'a>> {
+        self.lines_read += 1;
+        let lines_read = self.lines_read;
+
+        let mut create_result = move |line: Option<&'a [u8]>| {
+            let result = line
+                .map(|l| str::from_utf8(l).expect("Line was not valid utf8."))
+                .map(|l| LineResult::new(l, lines_read));
+
+            result
+        };
+
         while self.line_buffer.line_break_idxs.is_empty() {
             self.line_buffer.roll_to_front();
             // There are currently no full lines in the buffer, so fill it up.
@@ -253,15 +264,8 @@ where
                 // Our reader had nothing left, so if we only have a partial line in the buffer,
                 // we need to return it, since it will never get completed.
                 let line = self.line_buffer.consume_remaining();
-                let lines_read = self.lines_read;
 
-                let result = line
-                    .map(|l| str::from_utf8(l).expect("Line was not valid utf8."))
-                    .map(|l| LineResult::new(l, lines_read));
-
-                self.lines_read += 1;
-
-                return result;
+                return create_result(line);
             }
         }
 
@@ -269,15 +273,8 @@ where
         // with at least one full line (which we consume below), or
         // else it has already been completely exhausted.
         let line = self.line_buffer.consume_line();
-        let lines_read = self.lines_read;
 
-        let result = line
-            .map(|l| str::from_utf8(l).expect("Line was not valid utf8."))
-            .map(|l| LineResult::new(l, lines_read));
-
-        self.lines_read += 1;
-
-        result
+        create_result(line)
     }
 }
 
