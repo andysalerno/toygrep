@@ -2,7 +2,7 @@ use async_std::prelude::*;
 use std::collections::VecDeque;
 use std::str;
 
-pub struct LineResult<'a> {
+pub(crate) struct LineResult<'a> {
     line_num: usize,
     text: &'a str,
 }
@@ -12,11 +12,11 @@ impl<'a> LineResult<'a> {
         Self { line_num, text }
     }
 
-    pub fn line_num(&self) -> usize {
+    pub(crate) fn line_num(&self) -> usize {
         self.line_num
     }
 
-    pub fn text(&'a self) -> &'a str {
+    pub(crate) fn text(&'a self) -> &'a str {
         self.text
     }
 }
@@ -248,7 +248,7 @@ where
         self.lines_read += 1;
         let lines_read = self.lines_read;
 
-        let mut create_result = move |line: Option<&'a [u8]>| {
+        let create_result = move |line: Option<&'a [u8]>| {
             let result = line
                 .map(|l| str::from_utf8(l).expect("Line was not valid utf8."))
                 .map(|l| LineResult::new(l, lines_read));

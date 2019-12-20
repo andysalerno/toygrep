@@ -5,7 +5,7 @@ use async_std::io::{BufReader, Read};
 use async_std::path::Path;
 use async_std::prelude::*;
 use regex::Regex;
-use std::str;
+
 use std::str::Utf8Error;
 use std::sync::mpsc::channel;
 
