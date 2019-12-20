@@ -1,5 +1,25 @@
 use async_std::prelude::*;
 use std::collections::VecDeque;
+use std::str;
+
+pub struct LineResult<'a> {
+    line_num: usize,
+    text: &'a str,
+}
+
+impl<'a> LineResult<'a> {
+    fn new(text: &'a str, line_num: usize) -> Self {
+        Self { line_num, text }
+    }
+
+    pub fn line_num(&self) -> usize {
+        self.line_num
+    }
+
+    pub fn text(&'a self) -> &'a str {
+        self.text
+    }
+}
 
 pub(crate) struct AsyncLineBufferBuilder {
     line_break_byte: u8,
@@ -26,6 +46,7 @@ impl AsyncLineBufferBuilder {
 
     pub(crate) fn build(self) -> AsyncLineBuffer {
         AsyncLineBuffer {
+            // TODO: experiment with "reserved space" instead of pre-allocating
             buffer: vec![0u8; self.min_read_size],
             line_break_byte: self.line_break_byte,
             line_break_idxs: VecDeque::new(),
@@ -39,7 +60,6 @@ impl AsyncLineBufferBuilder {
 /// Strategy: fill as much as you can,
 ///             then read as much as you can; repeat.
 ///             Line doesn't fit? Grow buffer.
-///             Question: do we expand during filling? not sure yet
 /// An asynchronous line buffer.
 /// If this is being used to buffer content
 /// from a file, a good strategy would be to
@@ -87,33 +107,6 @@ pub(crate) struct AsyncLineBuffer {
 }
 
 impl AsyncLineBuffer {
-    /// Returns a writable slice for the portion
-    /// of the internal buffer that is writable.
-    /// Note that this may have length 0. Invoke `ensure_capacity()`
-    /// to guarantee space is available here.
-    fn writable_buffer_mut(&mut self) -> &mut [u8] {
-        &mut self.buffer[self.end..]
-    }
-
-    fn writable_buffer(&self) -> &[u8] {
-        &self.buffer[self.end..]
-    }
-
-    /// Resize the internal buffer if necessary
-    /// to guarantee there is at least `min_read_size`
-    /// available for writing to.
-    fn ensure_capacity(&mut self) {
-        if self.start == self.end && self.end != 0 {
-            // this is an indication the buffer is closed and no longer active.
-            return;
-        }
-
-        if self.end == self.buffer.len() {
-            let grow_to = self.buffer.len() * 2;
-            self.buffer.resize(grow_to, 0u8);
-        }
-    }
-
     /// Read asynchronously from the reader until the reader
     /// is exhausted, or the writable portion of this
     /// buffer has become full.
@@ -150,6 +143,33 @@ impl AsyncLineBuffer {
         self.end += bytes_count;
 
         bytes_count != 0
+    }
+
+    /// Returns a writable slice for the portion
+    /// of the internal buffer that is writable.
+    /// Note that this may have length 0. Invoke `ensure_capacity()`
+    /// to guarantee space is available here.
+    fn writable_buffer_mut(&mut self) -> &mut [u8] {
+        &mut self.buffer[self.end..]
+    }
+
+    fn writable_buffer(&self) -> &[u8] {
+        &self.buffer[self.end..]
+    }
+
+    /// Resize the internal buffer if necessary
+    /// to guarantee there is at least `min_read_size`
+    /// available for writing to.
+    fn ensure_capacity(&mut self) {
+        if self.start == self.end && self.end != 0 {
+            // this is an indication the buffer is closed and no longer active.
+            return;
+        }
+
+        if self.end == self.buffer.len() {
+            let grow_to = self.buffer.len() * 2;
+            self.buffer.resize(grow_to, 0u8);
+        }
     }
 
     /// Retrieve a slice containing the next line,
@@ -209,6 +229,7 @@ where
 {
     line_buffer: AsyncLineBuffer,
     reader: R,
+    lines_read: usize,
 }
 
 impl<R> AsyncLineBufferReader<R>
@@ -219,10 +240,11 @@ where
         Self {
             reader,
             line_buffer,
+            lines_read: 0,
         }
     }
 
-    pub(crate) async fn read_line(&mut self) -> Option<&[u8]> {
+    pub(crate) async fn read_line<'a>(&'a mut self) -> Option<LineResult<'a>> {
         while self.line_buffer.line_break_idxs.is_empty() {
             self.line_buffer.roll_to_front();
             // There are currently no full lines in the buffer, so fill it up.
@@ -230,14 +252,32 @@ where
             if !any_bytes_read {
                 // Our reader had nothing left, so if we only have a partial line in the buffer,
                 // we need to return it, since it will never get completed.
-                return self.line_buffer.consume_remaining();
+                let line = self.line_buffer.consume_remaining();
+                let lines_read = self.lines_read;
+
+                let result = line
+                    .map(|l| str::from_utf8(l).expect("Line was not valid utf8."))
+                    .map(|l| LineResult::new(l, lines_read));
+
+                self.lines_read += 1;
+
+                return result;
             }
         }
 
         // At this point, the line buffer is populated
         // with at least one full line (which we consume below), or
         // else it has already been completely exhausted.
-        self.line_buffer.consume_line()
+        let line = self.line_buffer.consume_line();
+        let lines_read = self.lines_read;
+
+        let result = line
+            .map(|l| str::from_utf8(l).expect("Line was not valid utf8."))
+            .map(|l| LineResult::new(l, lines_read));
+
+        self.lines_read += 1;
+
+        result
     }
 }
 
