@@ -25,7 +25,8 @@ where
     while let Some(line_bytes) = buffer.read_line().await {
         let line_result = line_bytes;
         if pattern.is_match(line_result.text()) {
-            result.push_str(line_result.text());
+            let formatted = format!("{}:{}", line_result.line_num(), line_result.text());
+            result.push_str(&formatted);
         }
     }
 
@@ -103,7 +104,6 @@ async fn search_file(file_path: impl Into<&Path>, pattern: &Regex) -> IoResult<S
 
     let min_read_size = usize::min(file_size_bytes as usize + 512, MAX_BUFF_LEN_BYTES);
 
-    // TODO: use min-read-len of the filesize if filesize is relatively low
     let line_buf = AsyncLineBufferBuilder::new()
         .with_minimum_read_size(min_read_size)
         .build();
