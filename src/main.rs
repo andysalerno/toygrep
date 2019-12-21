@@ -16,6 +16,7 @@
 
 mod arg_parse;
 mod async_line_buffer;
+mod error;
 mod printer;
 mod search;
 mod search_target;

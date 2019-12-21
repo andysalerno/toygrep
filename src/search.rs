@@ -1,4 +1,5 @@
 use crate::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader, LineResult};
+use crate::error::{Error, Result};
 use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;
@@ -14,12 +15,13 @@ pub(crate) async fn search_via_reader<R>(
     pattern: &Regex,
     mut buffer: AsyncLineBufferReader<R>,
     printer: Sender<LineResult>,
-) where
+) -> Result<()>
+where
     R: Read + std::marker::Unpin,
 {
     // TODO: fiddle with capacity
     while let Some(line_bytes) = buffer.read_line().await {
-        let line_result = line_bytes;
+        let line_result = line_bytes?;
         if pattern.is_match(line_result.text()) {
             printer
                 .send(line_result)
@@ -28,6 +30,8 @@ pub(crate) async fn search_via_reader<R>(
     }
 
     drop(printer);
+
+    Ok(())
 }
 
 pub(crate) async fn search_target(
