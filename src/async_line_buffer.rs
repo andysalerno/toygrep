@@ -1,3 +1,5 @@
+#![allow(clippy::needless_lifetimes)] // needed or else it warns on read_line() (possible clippy bug?)
+
 use async_std::prelude::*;
 use std::collections::VecDeque;
 use std::str;
@@ -249,11 +251,8 @@ where
         let lines_read = self.lines_read;
 
         let create_result = move |line: Option<&'a [u8]>| {
-            let result = line
-                .map(|l| str::from_utf8(l).expect("Line was not valid utf8."))
-                .map(|l| LineResult::new(l, lines_read));
-
-            result
+            line.map(|l| str::from_utf8(l).expect("Line was not valid utf8."))
+                .map(|l| LineResult::new(l, lines_read))
         };
 
         while self.line_buffer.line_break_idxs.is_empty() {
