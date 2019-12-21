@@ -1,3 +1,4 @@
+use crate::async_line_buffer::LineResult;
 use std::sync::mpsc;
 
 struct StdOutPrinterConfig {
@@ -7,11 +8,11 @@ struct StdOutPrinterConfig {
 
 pub(crate) struct StdOutPrinterBuilder {
     config: StdOutPrinterConfig,
-    receiver: mpsc::Receiver<String>,
+    receiver: mpsc::Receiver<LineResult>,
 }
 
 impl StdOutPrinterBuilder {
-    pub fn new(receiver: mpsc::Receiver<String>) -> Self {
+    pub fn new(receiver: mpsc::Receiver<LineResult>) -> Self {
         Self {
             config: StdOutPrinterConfig {
                 print_line_num: true,
@@ -29,17 +30,17 @@ impl StdOutPrinterBuilder {
 /// A simple printer that is just a proxy to the println! macro.
 pub(crate) struct StdOutPrinter {
     config: StdOutPrinterConfig,
-    receiver: mpsc::Receiver<String>,
+    receiver: mpsc::Receiver<LineResult>,
 }
 
 impl StdOutPrinter {
-    fn new(receiver: mpsc::Receiver<String>, config: StdOutPrinterConfig) -> Self {
+    fn new(receiver: mpsc::Receiver<LineResult>, config: StdOutPrinterConfig) -> Self {
         Self { receiver, config }
     }
 
     pub fn listen(&self) {
         while let Ok(s) = self.receiver.recv() {
-            print!("{}", s);
+            print!("{}", s.text());
         }
     }
 }

@@ -13,7 +13,7 @@ const MAX_BUFF_LEN_BYTES: usize = 2_000_000;
 pub(crate) async fn search_via_reader<R>(
     pattern: &Regex,
     mut buffer: AsyncLineBufferReader<R>,
-    printer: Sender<String>,
+    printer: Sender<LineResult>,
 ) where
     R: Read + std::marker::Unpin,
 {
@@ -21,9 +21,11 @@ pub(crate) async fn search_via_reader<R>(
     while let Some(line_bytes) = buffer.read_line().await {
         let line_result = line_bytes;
         if pattern.is_match(line_result.text()) {
-            let formatted = format!("{}:{}", line_result.line_num(), line_result.text());
+            // let formatted = format!("{}:{}", line_result.line_num(), line_result.text());
             // result.push_str(&formatted);
-            printer.send(formatted).expect("Failed sending to printer.");
+            printer
+                .send(line_result)
+                .expect("Failed sending to printer.");
         }
     }
 
@@ -33,7 +35,7 @@ pub(crate) async fn search_via_reader<R>(
 pub(crate) async fn search_target(
     target_path: impl Into<&Path>,
     pattern: &Regex,
-    printer: Sender<String>,
+    printer: Sender<LineResult>,
 ) {
     // If the target is a file, search it.
     let target_path = target_path.into();
@@ -50,7 +52,7 @@ pub(crate) async fn search_target(
     }
 }
 
-async fn search_directory(directory_path: &Path, pattern: &Regex, printer: Sender<String>) {
+async fn search_directory(directory_path: &Path, pattern: &Regex, printer: Sender<LineResult>) {
     let (sender, receiver) = channel();
 
     sender
@@ -89,7 +91,7 @@ async fn search_directory(directory_path: &Path, pattern: &Regex, printer: Sende
     }
 }
 
-async fn search_file(file_path: impl Into<&Path>, pattern: &Regex, printer: Sender<String>) {
+async fn search_file(file_path: impl Into<&Path>, pattern: &Regex, printer: Sender<LineResult>) {
     let path = file_path.into();
     let file = File::open(path).await.expect("failed opening file");
     let file_size_bytes = fs::metadata(path)
