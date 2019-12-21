@@ -21,8 +21,6 @@ pub(crate) async fn search_via_reader<R>(
     while let Some(line_bytes) = buffer.read_line().await {
         let line_result = line_bytes;
         if pattern.is_match(line_result.text()) {
-            // let formatted = format!("{}:{}", line_result.line_num(), line_result.text());
-            // result.push_str(&formatted);
             printer
                 .send(line_result)
                 .expect("Failed sending to printer.");

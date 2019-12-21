@@ -40,7 +40,13 @@ impl StdOutPrinter {
 
     pub fn listen(&self) {
         while let Ok(s) = self.receiver.recv() {
-            print!("{}", s.text());
+            let line_num = if self.config.print_line_num {
+                format!("{}:", s.line_num())
+            } else {
+                "".to_owned()
+            };
+
+            print!("{}{}", line_num, s.text());
         }
     }
 }
