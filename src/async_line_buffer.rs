@@ -293,7 +293,7 @@ mod test {
 
         let line = async_std::task::block_on(async { reader.read_line().await });
 
-        assert_eq!(b"This is a simple test.", line.unwrap());
+        assert_eq!("This is a simple test.", line.unwrap().text());
     }
 
     #[test]
@@ -307,10 +307,10 @@ mod test {
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
         let line = async_std::task::block_on(async { reader.read_line().await });
-        assert_eq!(b"This is a simple test.\n", line.unwrap());
+        assert_eq!("This is a simple test.\n", line.unwrap().text());
 
         let line = async_std::task::block_on(async { reader.read_line().await });
-        assert_eq!(b"And now it has two lines.", line.unwrap());
+        assert_eq!("And now it has two lines.", line.unwrap().text());
     }
 
     #[test]
@@ -323,7 +323,7 @@ mod test {
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
         let line = async_std::task::block_on(async { reader.read_line().await });
-        assert_eq!(b"This is a simple test.", line.unwrap());
+        assert_eq!("This is a simple test.", line.unwrap().text());
     }
 
     #[test]
@@ -337,10 +337,10 @@ mod test {
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
         let line = async_std::task::block_on(async { reader.read_line().await });
-        assert_eq!(b"This is a simple test.\n", line.unwrap());
+        assert_eq!("This is a simple test.\n", line.unwrap().text());
 
         let line = async_std::task::block_on(async { reader.read_line().await });
-        assert_eq!(b"And now it has two lines.", line.unwrap());
+        assert_eq!("And now it has two lines.", line.unwrap().text());
     }
 
     #[test]
@@ -359,8 +359,8 @@ mod test {
 
             let line = reader.read_line().await;
 
-            assert_eq!(
-                None, line,
+            assert!(
+                line.is_none(),
                 "There were only two lines, and two lines were consumed already, \
                  so this should give None."
             );
@@ -383,8 +383,8 @@ mod test {
 
             let line = reader.read_line().await;
 
-            assert_eq!(
-                None, line,
+            assert!(
+                line.is_none(),
                 "There were only two lines, and two lines were consumed already, \
                  so this should give None."
             );
@@ -403,8 +403,8 @@ mod test {
         async_std::task::block_on(async {
             let line = reader.read_line().await;
 
-            assert_eq!(
-                None, line,
+            assert!(
+                line.is_none(),
                 "The reader was totally empty, so the result should be None."
             );
         });
@@ -422,7 +422,7 @@ mod test {
         async_std::task::block_on(async {
             let line = reader.read_line().await;
 
-            assert_eq!(Some("\n".as_bytes()), line);
+            assert_eq!("\n", line.unwrap().text());
         });
     }
 
@@ -437,19 +437,19 @@ mod test {
 
         async_std::task::block_on(async {
             let line = reader.read_line().await;
-            assert_eq!(Some("\n".as_bytes()), line);
+            assert_eq!("\n", line.unwrap().text());
 
             let line = reader.read_line().await;
-            assert_eq!(Some("\n".as_bytes()), line);
+            assert_eq!("\n", line.unwrap().text());
 
             let line = reader.read_line().await;
-            assert_eq!(Some("\n".as_bytes()), line);
+            assert_eq!("\n", line.unwrap().text());
 
             let line = reader.read_line().await;
-            assert_eq!(Some("\n".as_bytes()), line);
+            assert_eq!("\n", line.unwrap().text());
 
             let line = reader.read_line().await;
-            assert_eq!(None, line);
+            assert!(line.is_none());
         });
     }
 
@@ -464,10 +464,10 @@ mod test {
 
         async_std::task::block_on(async {
             let line = reader.read_line().await;
-            assert_eq!(Some("H".as_bytes()), line);
+            assert_eq!("H", line.unwrap().text());
 
             let line = reader.read_line().await;
-            assert_eq!(None, line);
+            assert!(line.is_none());
         });
     }
 
@@ -492,36 +492,36 @@ to have had so much blood in him.
         async_std::task::block_on(async {
             let line = reader.read_line().await.unwrap();
             assert_eq!(
-                "Out, damned spot! out, I say!--One: two: why,\n".as_bytes(),
-                line
+                "Out, damned spot! out, I say!--One: two: why,\n",
+                line.text()
             );
 
             let line = reader.read_line().await.unwrap();
             assert_eq!(
-                "then, 'tis time to do't.--Hell is murky!--Fie, my\n".as_bytes(),
-                line
+                "then, 'tis time to do't.--Hell is murky!--Fie, my\n",
+                line.text()
             );
 
             let line = reader.read_line().await.unwrap();
             assert_eq!(
-                "lord, fie! a soldier, and afeard? What need we\n".as_bytes(),
-                line
+                "lord, fie! a soldier, and afeard? What need we\n",
+                line.text()
             );
 
             let line = reader.read_line().await.unwrap();
             assert_eq!(
-                "fear who knows it, when none can call our power to\n".as_bytes(),
-                line
+                "fear who knows it, when none can call our power to\n",
+                line.text()
             );
 
             let line = reader.read_line().await.unwrap();
             assert_eq!(
-                "account?--Yet who would have thought the old man\n".as_bytes(),
-                line
+                "account?--Yet who would have thought the old man\n",
+                line.text()
             );
 
             let line = reader.read_line().await.unwrap();
-            assert_eq!("to have had so much blood in him.".as_bytes(), line);
+            assert_eq!("to have had so much blood in him.", line.text());
         });
     }
 }
