@@ -16,14 +16,18 @@
 
 mod arg_parse;
 mod async_line_buffer;
+mod printer;
 mod search;
 mod search_target;
 
 use async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
 use async_std::io::BufReader;
 use async_std::path::Path;
+use printer::StdOutPrinter;
 use regex::RegexBuilder;
 use search_target::SearchTarget;
+use std::sync::mpsc;
+use std::thread;
 
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -49,6 +53,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|e| panic!("{:?}", e))
     };
 
+    let (sender, receiver) = mpsc::channel();
+    let printer = StdOutPrinter::new(receiver);
+    let printer_handle = thread::spawn(move || {
+        printer.listen();
+    });
+
     if user_input.search_target == SearchTarget::Stdin {
         let file_rdr = BufReader::new(async_std::io::stdin());
         let line_buf = AsyncLineBufferBuilder::new()
@@ -57,20 +67,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let line_rdr = AsyncLineBufferReader::new(file_rdr, line_buf);
 
-        let search_result = search::search_via_reader(&regex, line_rdr)
-            .await
-            .unwrap_or_else(|_| panic!("Unable to parse input as utf8."));
-
-        println!("{}", search_result);
+        search::search_via_reader(&regex, line_rdr, sender.clone()).await;
     } else {
         for target in user_input.search_targets {
             let path: &Path = &target;
-
-            let search_result = search::search_target(path, &regex).await?;
-
-            println!("{}", search_result);
+            search::search_target(path, &regex, sender.clone()).await;
         }
     };
+
+    drop(sender);
+
+    printer_handle
+        .join()
+        .expect("Failed to join the printer thread.");
 
     Ok(())
 }
