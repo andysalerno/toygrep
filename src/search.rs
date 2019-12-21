@@ -1,4 +1,4 @@
-use crate::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
+use crate::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader, LineResult};
 use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;

@@ -1,28 +1,40 @@
 use std::sync::mpsc;
 
-struct StdOutPrinterConfig {}
+struct StdOutPrinterConfig {
+    print_line_num: bool,
+    group_by_file: bool,
+}
 
 pub(crate) struct StdOutPrinterBuilder {
     config: StdOutPrinterConfig,
+    receiver: mpsc::Receiver<String>,
 }
 
 impl StdOutPrinterBuilder {
-    fn new() -> Self {
+    pub fn new(receiver: mpsc::Receiver<String>) -> Self {
         Self {
-            config: StdOutPrinterConfig {},
+            config: StdOutPrinterConfig {
+                print_line_num: true,
+                group_by_file: true,
+            },
+            receiver,
         }
+    }
+
+    pub fn build(self) -> StdOutPrinter {
+        StdOutPrinter::new(self.receiver, self.config)
     }
 }
 
 /// A simple printer that is just a proxy to the println! macro.
 pub(crate) struct StdOutPrinter {
-    // config: StdOutPrinterConfig,
+    config: StdOutPrinterConfig,
     receiver: mpsc::Receiver<String>,
 }
 
 impl StdOutPrinter {
-    pub fn new(receiver: mpsc::Receiver<String>) -> Self {
-        Self { receiver }
+    fn new(receiver: mpsc::Receiver<String>, config: StdOutPrinterConfig) -> Self {
+        Self { receiver, config }
     }
 
     pub fn listen(&self) {

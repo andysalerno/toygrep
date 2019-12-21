@@ -23,7 +23,7 @@ mod search_target;
 use async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
 use async_std::io::BufReader;
 use async_std::path::Path;
-use printer::StdOutPrinter;
+use printer::StdOutPrinterBuilder;
 use regex::RegexBuilder;
 use search_target::SearchTarget;
 use std::sync::mpsc;
@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let (sender, receiver) = mpsc::channel();
-    let printer = StdOutPrinter::new(receiver);
+    let printer = StdOutPrinterBuilder::new(receiver).build();
     let printer_handle = thread::spawn(move || {
         printer.listen();
     });
