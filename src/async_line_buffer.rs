@@ -4,13 +4,13 @@ use async_std::prelude::*;
 use std::collections::VecDeque;
 use std::str;
 
-pub(crate) struct LineResult<'a> {
+pub(crate) struct LineResult {
     line_num: usize,
-    text: &'a str,
+    text: String,
 }
 
-impl<'a> LineResult<'a> {
-    fn new(text: &'a str, line_num: usize) -> Self {
+impl LineResult {
+    fn new(text: String, line_num: usize) -> Self {
         Self { line_num, text }
     }
 
@@ -18,8 +18,8 @@ impl<'a> LineResult<'a> {
         self.line_num
     }
 
-    pub(crate) fn text(&'a self) -> &'a str {
-        self.text
+    pub(crate) fn text(&self) -> &str {
+        &self.text
     }
 }
 
@@ -246,13 +246,13 @@ where
         }
     }
 
-    pub(crate) async fn read_line<'a>(&'a mut self) -> Option<LineResult<'a>> {
+    pub(crate) async fn read_line<'a>(&'a mut self) -> Option<LineResult> {
         self.lines_read += 1;
         let lines_read = self.lines_read;
 
         let create_result = move |line: Option<&'a [u8]>| {
             line.map(|l| str::from_utf8(l).expect("Line was not valid utf8."))
-                .map(|l| LineResult::new(l, lines_read))
+                .map(|l| LineResult::new(l.to_owned(), lines_read))
         };
 
         while self.line_buffer.line_break_idxs.is_empty() {
