@@ -24,7 +24,7 @@ mod search_target;
 use async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
 use async_std::io::BufReader;
 use async_std::path::Path;
-use printer::{PrintableResult, StdOutPrinterBuilder};
+use printer::{PrintMessage, StdOutPrinterBuilder};
 use regex::bytes::RegexBuilder;
 use search_target::SearchTarget;
 use std::sync::mpsc;

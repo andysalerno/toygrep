@@ -1,6 +1,6 @@
 use crate::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
 use crate::error::Result;
-use crate::printer::PrintableResult;
+use crate::printer::PrintMessage;
 use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;
@@ -16,7 +16,7 @@ pub(crate) async fn search_via_reader<R>(
     pattern: &Regex,
     mut buffer: AsyncLineBufferReader<R>,
     name: Option<String>,
-    printer: Sender<PrintableResult>,
+    printer: Sender<PrintMessage>,
 ) -> Result<()>
 where
     R: Read + std::marker::Unpin,
@@ -25,13 +25,15 @@ where
     let name = name.unwrap_or_default();
     while let Some(line_result) = buffer.read_line().await {
         if pattern.is_match(line_result.text()) {
-            let printable = PrintableResult {
+            let printable = PrintMessage::PrintableResult {
                 target_name: name.clone(),
                 line_result,
             };
             printer.send(printable).expect("Failed sending to printer.");
         }
     }
+
+    printer.send(PrintMessage::EndOfReading { target_name: name });
 
     drop(printer);
 
@@ -41,7 +43,7 @@ where
 pub(crate) async fn search_target(
     target_path: impl Into<&Path>,
     pattern: &Regex,
-    printer: Sender<PrintableResult>,
+    printer: Sender<PrintMessage>,
 ) {
     // If the target is a file, search it.
     let target_path = target_path.into();
@@ -58,11 +60,7 @@ pub(crate) async fn search_target(
     }
 }
 
-async fn search_directory(
-    directory_path: &Path,
-    pattern: &Regex,
-    printer: Sender<PrintableResult>,
-) {
+async fn search_directory(directory_path: &Path, pattern: &Regex, printer: Sender<PrintMessage>) {
     let (sender, receiver) = channel();
 
     sender
@@ -105,7 +103,7 @@ async fn search_file(
     // TODO: should be AsRef?
     file_path: impl Into<&Path>,
     pattern: &Regex,
-    printer: Sender<PrintableResult>,
+    printer: Sender<PrintMessage>,
 ) {
     let path = file_path.into();
     let file = File::open(path).await.expect("failed opening file");

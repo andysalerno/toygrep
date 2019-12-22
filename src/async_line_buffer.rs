@@ -1,9 +1,7 @@
 #![allow(clippy::needless_lifetimes)] // needed or else it warns on read_line() (possible clippy bug?)
 
-use crate::error::Error;
 use async_std::prelude::*;
 use std::collections::VecDeque;
-use std::str;
 
 pub(crate) struct LineResult {
     line_num: usize,
@@ -252,15 +250,7 @@ where
     /// `Some(Err(...))` if a line was read but failed to parse.
     pub(crate) async fn read_line<'a>(&'a mut self) -> Option<LineResult> {
         self.lines_read += 1;
-        let lines_read = self.lines_read;
-
-        // let create_result = move |line: Option<&'a [u8]>| -> Option<Result<LineResult, Error>> {
-        //     line.map(|l| LineResult::new(l.into(), lines_read))
-        //     // line.map(|l| str::from_utf8(l)).map(|u| {
-        //     //     u.map_err(|_| Error::Utf8Error)
-        //     //         .map(|l| LineResult::new(l.to_owned(), lines_read))
-        //     // })
-        // };
+        let line_num = self.lines_read;
 
         while self.line_buffer.line_break_idxs.is_empty() {
             self.line_buffer.roll_to_front();
@@ -272,7 +262,7 @@ where
                 let line = self.line_buffer.consume_remaining();
 
                 //return create_result(line);
-                return line.map(|l| LineResult::new(l.into(), lines_read));
+                return line.map(|l| LineResult::new(l.into(), line_num));
             }
         }
 
@@ -280,7 +270,7 @@ where
         // with at least one full line (which we consume below), or
         // else it has already been completely exhausted.
         let line = self.line_buffer.consume_line();
-        line.map(|l| LineResult::new(l.into(), lines_read))
+        line.map(|l| LineResult::new(l.into(), line_num))
     }
 }
 
