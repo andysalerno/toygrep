@@ -25,7 +25,7 @@ use async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
 use async_std::io::BufReader;
 use async_std::path::Path;
 use printer::{PrintableResult, StdOutPrinterBuilder};
-use regex::RegexBuilder;
+use regex::bytes::RegexBuilder;
 use search_target::SearchTarget;
 use std::sync::mpsc;
 use std::thread;

@@ -66,7 +66,11 @@ impl StdOutPrinter {
                     "".to_owned()
                 };
 
-                print!("{}{}", line_num, s.line_result.text());
+                print!(
+                    "{}{}",
+                    line_num,
+                    std::str::from_utf8(s.line_result.text()).unwrap()
+                );
             }
         }
 
@@ -80,7 +84,11 @@ impl StdOutPrinter {
                         "".to_owned()
                     };
 
-                    print!("{}{}", line_num, line_result.text());
+                    print!(
+                        "{}{}",
+                        line_num,
+                        std::str::from_utf8(line_result.text()).unwrap()
+                    );
                 }
             }
         }

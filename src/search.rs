@@ -5,7 +5,7 @@ use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;
 use async_std::prelude::*;
-use regex::Regex;
+use regex::bytes::Regex;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::Sender;
 
@@ -23,8 +23,7 @@ where
 {
     // TODO: fiddle with capacity
     let name = name.unwrap_or_default();
-    while let Some(line_bytes) = buffer.read_line().await {
-        let line_result = line_bytes?;
+    while let Some(line_result) = buffer.read_line().await {
         if pattern.is_match(line_result.text()) {
             let printable = PrintableResult {
                 target_name: name.clone(),

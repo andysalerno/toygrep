@@ -7,11 +7,11 @@ use std::str;
 
 pub(crate) struct LineResult {
     line_num: usize,
-    text: String,
+    text: Vec<u8>,
 }
 
 impl LineResult {
-    fn new(text: String, line_num: usize) -> Self {
+    fn new(text: Vec<u8>, line_num: usize) -> Self {
         Self { line_num, text }
     }
 
@@ -19,7 +19,7 @@ impl LineResult {
         self.line_num
     }
 
-    pub(crate) fn text(&self) -> &str {
+    pub(crate) fn text(&self) -> &[u8] {
         &self.text
     }
 }
@@ -250,16 +250,17 @@ where
     /// `None` if there are no lines remaining to read.
     /// `Some(Ok(...))` if a line was read and parsed successfully.
     /// `Some(Err(...))` if a line was read but failed to parse.
-    pub(crate) async fn read_line<'a>(&'a mut self) -> Option<Result<LineResult, Error>> {
+    pub(crate) async fn read_line<'a>(&'a mut self) -> Option<LineResult> {
         self.lines_read += 1;
         let lines_read = self.lines_read;
 
-        let create_result = move |line: Option<&'a [u8]>| -> Option<Result<LineResult, Error>> {
-            line.map(|l| str::from_utf8(l)).map(|u| {
-                u.map_err(|_| Error::Utf8Error)
-                    .map(|l| LineResult::new(l.to_owned(), lines_read))
-            })
-        };
+        // let create_result = move |line: Option<&'a [u8]>| -> Option<Result<LineResult, Error>> {
+        //     line.map(|l| LineResult::new(l.into(), lines_read))
+        //     // line.map(|l| str::from_utf8(l)).map(|u| {
+        //     //     u.map_err(|_| Error::Utf8Error)
+        //     //         .map(|l| LineResult::new(l.to_owned(), lines_read))
+        //     // })
+        // };
 
         while self.line_buffer.line_break_idxs.is_empty() {
             self.line_buffer.roll_to_front();
@@ -270,7 +271,8 @@ where
                 // we need to return it, since it will never get completed.
                 let line = self.line_buffer.consume_remaining();
 
-                return create_result(line);
+                //return create_result(line);
+                return line.map(|l| LineResult::new(l.into(), lines_read));
             }
         }
 
@@ -278,8 +280,7 @@ where
         // with at least one full line (which we consume below), or
         // else it has already been completely exhausted.
         let line = self.line_buffer.consume_line();
-
-        create_result(line)
+        line.map(|l| LineResult::new(l.into(), lines_read))
     }
 }
 
