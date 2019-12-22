@@ -1,5 +1,6 @@
-use crate::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader, LineResult};
-use crate::error::{Error, Result};
+use crate::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
+use crate::error::Result;
+use crate::printer::PrintableResult;
 use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;
@@ -14,18 +15,22 @@ const MAX_BUFF_LEN_BYTES: usize = 2_000_000;
 pub(crate) async fn search_via_reader<R>(
     pattern: &Regex,
     mut buffer: AsyncLineBufferReader<R>,
-    printer: Sender<LineResult>,
+    name: Option<String>,
+    printer: Sender<PrintableResult>,
 ) -> Result<()>
 where
     R: Read + std::marker::Unpin,
 {
     // TODO: fiddle with capacity
+    let name = name.unwrap_or_default();
     while let Some(line_bytes) = buffer.read_line().await {
         let line_result = line_bytes?;
         if pattern.is_match(line_result.text()) {
-            printer
-                .send(line_result)
-                .expect("Failed sending to printer.");
+            let printable = PrintableResult {
+                file_name: name.clone(),
+                line_result,
+            };
+            printer.send(printable).expect("Failed sending to printer.");
         }
     }
 
@@ -37,7 +42,7 @@ where
 pub(crate) async fn search_target(
     target_path: impl Into<&Path>,
     pattern: &Regex,
-    printer: Sender<LineResult>,
+    printer: Sender<PrintableResult>,
 ) {
     // If the target is a file, search it.
     let target_path = target_path.into();
@@ -54,7 +59,11 @@ pub(crate) async fn search_target(
     }
 }
 
-async fn search_directory(directory_path: &Path, pattern: &Regex, printer: Sender<LineResult>) {
+async fn search_directory(
+    directory_path: &Path,
+    pattern: &Regex,
+    printer: Sender<PrintableResult>,
+) {
     let (sender, receiver) = channel();
 
     sender
@@ -93,7 +102,12 @@ async fn search_directory(directory_path: &Path, pattern: &Regex, printer: Sende
     }
 }
 
-async fn search_file(file_path: impl Into<&Path>, pattern: &Regex, printer: Sender<LineResult>) {
+async fn search_file(
+    // TODO: should be AsRef?
+    file_path: impl Into<&Path>,
+    pattern: &Regex,
+    printer: Sender<PrintableResult>,
+) {
     let path = file_path.into();
     let file = File::open(path).await.expect("failed opening file");
     let file_size_bytes = fs::metadata(path)
@@ -109,5 +123,7 @@ async fn search_file(file_path: impl Into<&Path>, pattern: &Regex, printer: Send
         .build();
     let line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf);
 
-    let result = search_via_reader(pattern, line_buf_rdr, printer).await;
+    let target_name = Some(path.to_string_lossy().to_string());
+
+    search_via_reader(pattern, line_buf_rdr, target_name, printer).await;
 }
