@@ -23,7 +23,7 @@ pub(crate) struct StdOutPrinterBuilder {
 }
 
 impl StdOutPrinterBuilder {
-    pub fn new(receiver: mpsc::Receiver<PrintMessage>) -> Self {
+    pub(crate) fn new(receiver: mpsc::Receiver<PrintMessage>) -> Self {
         Self {
             config: StdOutPrinterConfig {
                 print_line_num: true,
@@ -33,7 +33,7 @@ impl StdOutPrinterBuilder {
         }
     }
 
-    pub fn build(self) -> StdOutPrinter {
+    pub(crate) fn build(self) -> StdOutPrinter {
         StdOutPrinter::new(self.receiver, self.config)
     }
 }
@@ -54,7 +54,7 @@ impl StdOutPrinter {
         }
     }
 
-    pub fn listen(&mut self) {
+    pub(crate) fn listen(&mut self) {
         while let Ok(message) = self.receiver.recv() {
             if self.config.group_by_target {
                 match message {
