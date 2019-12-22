@@ -290,7 +290,7 @@ mod test {
 
         let line = async_std::task::block_on(async { reader.read_line().await });
 
-        assert_eq!("This is a simple test.", line.unwrap().unwrap().text());
+        assert_eq!("This is a simple test.".as_bytes(), line.unwrap().text());
     }
 
     #[test]
@@ -304,10 +304,10 @@ mod test {
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
         let line = async_std::task::block_on(async { reader.read_line().await });
-        assert_eq!("This is a simple test.\n", line.unwrap().unwrap().text());
+        assert_eq!("This is a simple test.\n".as_bytes(), line.unwrap().text());
 
         let line = async_std::task::block_on(async { reader.read_line().await });
-        assert_eq!("And now it has two lines.", line.unwrap().unwrap().text());
+        assert_eq!("And now it has two lines.".as_bytes(), line.unwrap().text());
     }
 
     #[test]
@@ -320,7 +320,7 @@ mod test {
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
         let line = async_std::task::block_on(async { reader.read_line().await });
-        assert_eq!("This is a simple test.", line.unwrap().unwrap().text());
+        assert_eq!("This is a simple test.".as_bytes(), line.unwrap().text());
     }
 
     #[test]
@@ -334,10 +334,10 @@ mod test {
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
         let line = async_std::task::block_on(async { reader.read_line().await });
-        assert_eq!("This is a simple test.\n", line.unwrap().unwrap().text());
+        assert_eq!("This is a simple test.\n".as_bytes(), line.unwrap().text());
 
         let line = async_std::task::block_on(async { reader.read_line().await });
-        assert_eq!("And now it has two lines.", line.unwrap().unwrap().text());
+        assert_eq!("And now it has two lines.".as_bytes(), line.unwrap().text());
     }
 
     #[test]
@@ -419,7 +419,7 @@ mod test {
         async_std::task::block_on(async {
             let line = reader.read_line().await;
 
-            assert_eq!("\n", line.unwrap().unwrap().text());
+            assert_eq!("\n".as_bytes(), line.unwrap().text());
         });
     }
 
@@ -434,16 +434,16 @@ mod test {
 
         async_std::task::block_on(async {
             let line = reader.read_line().await;
-            assert_eq!("\n", line.unwrap().unwrap().text());
+            assert_eq!("\n".as_bytes(), line.unwrap().text());
 
             let line = reader.read_line().await;
-            assert_eq!("\n", line.unwrap().unwrap().text());
+            assert_eq!("\n".as_bytes(), line.unwrap().text());
 
             let line = reader.read_line().await;
-            assert_eq!("\n", line.unwrap().unwrap().text());
+            assert_eq!("\n".as_bytes(), line.unwrap().text());
 
             let line = reader.read_line().await;
-            assert_eq!("\n", line.unwrap().unwrap().text());
+            assert_eq!("\n".as_bytes(), line.unwrap().text());
 
             let line = reader.read_line().await;
             assert!(line.is_none());
@@ -461,7 +461,7 @@ mod test {
 
         async_std::task::block_on(async {
             let line = reader.read_line().await;
-            assert_eq!("H", line.unwrap().unwrap().text());
+            assert_eq!("H".as_bytes(), line.unwrap().text());
 
             let line = reader.read_line().await;
             assert!(line.is_none());
@@ -487,38 +487,38 @@ to have had so much blood in him.
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
         async_std::task::block_on(async {
-            let line = reader.read_line().await.unwrap().unwrap();
+            let line = reader.read_line().await.unwrap();
             assert_eq!(
-                "Out, damned spot! out, I say!--One: two: why,\n",
+                "Out, damned spot! out, I say!--One: two: why,\n".as_bytes(),
                 line.text()
             );
 
-            let line = reader.read_line().await.unwrap().unwrap();
+            let line = reader.read_line().await.unwrap();
             assert_eq!(
-                "then, 'tis time to do't.--Hell is murky!--Fie, my\n",
+                "then, 'tis time to do't.--Hell is murky!--Fie, my\n".as_bytes(),
                 line.text()
             );
 
-            let line = reader.read_line().await.unwrap().unwrap();
+            let line = reader.read_line().await.unwrap();
             assert_eq!(
-                "lord, fie! a soldier, and afeard? What need we\n",
+                "lord, fie! a soldier, and afeard? What need we\n".as_bytes(),
                 line.text()
             );
 
-            let line = reader.read_line().await.unwrap().unwrap();
+            let line = reader.read_line().await.unwrap();
             assert_eq!(
-                "fear who knows it, when none can call our power to\n",
+                "fear who knows it, when none can call our power to\n".as_bytes(),
                 line.text()
             );
 
-            let line = reader.read_line().await.unwrap().unwrap();
+            let line = reader.read_line().await.unwrap();
             assert_eq!(
-                "account?--Yet who would have thought the old man\n",
+                "account?--Yet who would have thought the old man\n".as_bytes(),
                 line.text()
             );
 
-            let line = reader.read_line().await.unwrap().unwrap();
-            assert_eq!("to have had so much blood in him.", line.text());
+            let line = reader.read_line().await.unwrap();
+            assert_eq!("to have had so much blood in him.".as_bytes(), line.text());
         });
     }
 }
