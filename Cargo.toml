@@ -17,3 +17,4 @@ features = ["attributes"]
 
 [profile.release]
 panic = 'abort'
+debug = true

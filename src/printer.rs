@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 
 pub(crate) struct PrintableResult {
-    pub(crate) file_name: String,
+    pub(crate) target_name: String,
     pub(crate) line_result: LineResult,
 }
 
 struct StdOutPrinterConfig {
     print_line_num: bool,
-    group_by_file: bool,
+    group_by_target: bool,
 }
 
 pub(crate) struct StdOutPrinterBuilder {
@@ -22,7 +22,7 @@ impl StdOutPrinterBuilder {
         Self {
             config: StdOutPrinterConfig {
                 print_line_num: true,
-                group_by_file: true,
+                group_by_target: true,
             },
             receiver,
         }
@@ -51,12 +51,13 @@ impl StdOutPrinter {
 
     pub fn listen(&mut self) {
         while let Ok(s) = self.receiver.recv() {
-            if self.config.group_by_file {
-                if self.file_to_matches.get(&s.file_name).is_none() {
-                    self.file_to_matches.insert(s.file_name.clone(), Vec::new());
+            if self.config.group_by_target {
+                if self.file_to_matches.get(&s.target_name).is_none() {
+                    self.file_to_matches
+                        .insert(s.target_name.clone(), Vec::new());
                 }
 
-                let line_results = self.file_to_matches.get_mut(&s.file_name).unwrap();
+                let line_results = self.file_to_matches.get_mut(&s.target_name).unwrap();
                 line_results.push(s.line_result);
             } else {
                 let line_num = if self.config.print_line_num {
@@ -69,7 +70,7 @@ impl StdOutPrinter {
             }
         }
 
-        if self.config.group_by_file {
+        if self.config.group_by_target {
             for m in self.file_to_matches.iter() {
                 println!("\n{}", m.0);
                 for line_result in m.1 {

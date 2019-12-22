@@ -27,7 +27,7 @@ where
         let line_result = line_bytes?;
         if pattern.is_match(line_result.text()) {
             let printable = PrintableResult {
-                file_name: name.clone(),
+                target_name: name.clone(),
                 line_result,
             };
             printer.send(printable).expect("Failed sending to printer.");
