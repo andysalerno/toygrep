@@ -41,7 +41,7 @@ where
     Ok(())
 }
 
-pub(crate) async fn search_target<M: Matcher>(
+pub(crate) async fn search_target<M: Matcher + 'static>(
     target_path: impl Into<&Path>,
     matcher: M,
     printer: Sender<PrintMessage>,
@@ -61,7 +61,7 @@ pub(crate) async fn search_target<M: Matcher>(
     }
 }
 
-async fn search_directory<M: Matcher>(
+async fn search_directory<M: Matcher + 'static>(
     directory_path: &Path,
     matcher: M,
     printer: Sender<PrintMessage>,
@@ -79,15 +79,13 @@ async fn search_directory<M: Matcher>(
 
         while let Some(dir_child) = dir_children.next().await {
             let dir_child = dir_child.expect("Failed to make dir child.").path();
-            let matcher = matcher.clone();
-
-            let printer = printer.clone();
 
             if dir_child.is_file().await {
+                let printer = printer.clone();
+                let matcher = matcher.clone();
+
                 let task = async_std::task::spawn(async move {
                     let dir_child_path: &Path = &dir_child;
-                    let matcher = matcher;
-
                     search_file(dir_child_path, matcher, printer).await;
                 });
 

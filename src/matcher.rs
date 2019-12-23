@@ -1,6 +1,6 @@
 use regex::bytes::Regex;
 
-pub(crate) trait Matcher: Clone + Send + Sync {
+pub(crate) trait Matcher: Clone + Send + Sync + Sized {
     fn is_match(&self, bytes: &[u8]) -> bool;
 }
 
@@ -36,17 +36,17 @@ impl<'a> RegexMatcherBuilder<'a> {
         }
     }
 
-    pub fn for_pattern(self, pattern: &'a str) -> Self {
+    pub fn for_pattern(mut self, pattern: &'a str) -> Self {
         self.pattern = pattern;
         self
     }
 
-    pub fn case_insensitive(self, is_case_insensitive: bool) -> Self {
+    pub fn case_insensitive(mut self, is_case_insensitive: bool) -> Self {
         self.is_case_insensitive = is_case_insensitive;
         self
     }
 
-    pub fn match_whole_word(self, match_whole_word: bool) -> Self {
+    pub fn match_whole_word(mut self, match_whole_word: bool) -> Self {
         self.match_whole_word = match_whole_word;
         self
     }
