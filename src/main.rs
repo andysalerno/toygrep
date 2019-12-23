@@ -17,6 +17,7 @@
 mod arg_parse;
 mod async_line_buffer;
 mod error;
+mod matcher;
 mod printer;
 mod search;
 mod search_target;
@@ -24,8 +25,8 @@ mod search_target;
 use async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
 use async_std::io::BufReader;
 use async_std::path::Path;
-use printer::{PrintMessage, StdOutPrinterBuilder};
-use regex::bytes::RegexBuilder;
+use matcher::RegexMatcherBuilder;
+use printer::StdOutPrinterBuilder;
 use search_target::SearchTarget;
 use std::sync::mpsc;
 use std::thread;
@@ -41,18 +42,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         dbg!("Targets: {:?}", &user_input.search_targets);
     }
 
-    let regex = {
-        let with_whole_word = if user_input.whole_word {
-            format_word_match(user_input.search_pattern)
-        } else {
-            user_input.search_pattern
-        };
-
-        RegexBuilder::new(&with_whole_word)
-            .case_insensitive(user_input.case_insensitive)
-            .build()
-            .unwrap_or_else(|e| panic!("{:?}", e))
-    };
+    let matcher = RegexMatcherBuilder::new()
+        .for_pattern(&user_input.search_pattern)
+        .case_insensitive(user_input.case_insensitive)
+        .match_whole_word(user_input.whole_word)
+        .build();
 
     let (sender, receiver) = mpsc::channel();
     let mut printer = StdOutPrinterBuilder::new(receiver).build();
@@ -68,11 +62,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let line_rdr = AsyncLineBufferReader::new(file_rdr, line_buf);
 
-        search::search_via_reader(&regex, line_rdr, None, sender.clone()).await;
+        search::search_via_reader(matcher, line_rdr, None, sender.clone()).await;
     } else {
         for target in user_input.search_targets {
             let path: &Path = &target;
-            search::search_target(path, &regex, sender.clone()).await;
+            let matcher = matcher.clone();
+            search::search_target(path, matcher, sender.clone()).await;
         }
     };
 
@@ -83,8 +78,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to join the printer thread.");
 
     Ok(())
-}
-
-fn format_word_match(pattern: String) -> String {
-    format!(r"(?:(?m:^)|\W)({})(?:(?m:$)|\W)", pattern)
 }
