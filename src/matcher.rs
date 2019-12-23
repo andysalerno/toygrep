@@ -1,4 +1,4 @@
-use regex::bytes::Regex;
+use regex::bytes::{Regex, RegexBuilder};
 
 pub(crate) trait Matcher: Clone + Send + Sync + Sized {
     fn is_match(&self, bytes: &[u8]) -> bool;
@@ -52,22 +52,23 @@ impl<'a> RegexMatcherBuilder<'a> {
     }
 
     pub fn build(self) -> RegexMatcher {
-        todo!()
-        // let regex = {
-        //     let with_whole_word = if user_input.whole_word {
-        //         format_word_match(user_input.search_pattern)
-        //     } else {
-        //         user_input.search_pattern
-        //     };
+        let regex = {
+            let with_whole_word = if self.match_whole_word {
+                format_word_match(self.pattern)
+            } else {
+                self.pattern.to_owned()
+            };
 
-        //     RegexBuilder::new(&with_whole_word)
-        //         .case_insensitive(user_input.case_insensitive)
-        //         .build()
-        //         .unwrap_or_else(|e| panic!("{:?}", e))
-        // };
+            RegexBuilder::new(&with_whole_word)
+                .case_insensitive(self.is_case_insensitive)
+                .build()
+                .unwrap_or_else(|e| panic!("{:?}", e))
+        };
+
+        RegexMatcher { regex }
     }
 }
 
-fn format_word_match(pattern: String) -> String {
+fn format_word_match(pattern: &str) -> String {
     format!(r"(?:(?m:^)|\W)({})(?:(?m:$)|\W)", pattern)
 }
