@@ -1,9 +1,16 @@
 use regex::bytes::{Regex, RegexBuilder};
 
+#[derive(Debug, Clone)]
+pub(crate) struct Match {
+    pub start: usize,
+    pub stop: usize,
+}
+
 /// A trait that promises to answer a simple question:
 /// does the given slice of bytes match a specific pattern?
 pub(crate) trait Matcher: Clone + Send + Sync + Sized {
     fn is_match(&self, bytes: &[u8]) -> bool;
+    fn find_matches(&self, bytes: &[u8]) -> Vec<Match>;
 }
 
 #[derive(Debug, Clone)]
@@ -14,6 +21,16 @@ pub(crate) struct RegexMatcher {
 impl Matcher for RegexMatcher {
     fn is_match(&self, bytes: &[u8]) -> bool {
         self.regex.is_match(bytes)
+    }
+
+    fn find_matches(&self, bytes: &[u8]) -> Vec<Match> {
+        self.regex
+            .find_iter(bytes)
+            .map(|m| Match {
+                start: m.start(),
+                stop: m.end(),
+            })
+            .collect()
     }
 }
 

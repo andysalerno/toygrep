@@ -49,7 +49,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build();
 
     let (sender, receiver) = mpsc::channel();
-    let mut printer = StdOutPrinterBuilder::new(receiver).build();
+    let mut printer = StdOutPrinterBuilder::new(receiver)
+        .with_matcher(matcher.clone())
+        .build();
+
     let printer_handle = thread::spawn(move || {
         printer.listen();
     });

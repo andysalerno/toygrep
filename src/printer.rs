@@ -1,6 +1,9 @@
 use crate::async_line_buffer::LineResult;
+use crate::matcher::Matcher;
 use std::collections::HashMap;
+use std::io::Write;
 use std::sync::mpsc;
+use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
 pub(crate) enum PrintMessage {
     PrintableResult {
@@ -17,12 +20,13 @@ struct StdOutPrinterConfig {
     group_by_target: bool,
 }
 
-pub(crate) struct StdOutPrinterBuilder {
+pub(crate) struct StdOutPrinterBuilder<M: Matcher> {
     config: StdOutPrinterConfig,
     receiver: mpsc::Receiver<PrintMessage>,
+    matcher: Option<M>,
 }
 
-impl StdOutPrinterBuilder {
+impl<M: Matcher> StdOutPrinterBuilder<M> {
     pub(crate) fn new(receiver: mpsc::Receiver<PrintMessage>) -> Self {
         Self {
             config: StdOutPrinterConfig {
@@ -30,27 +34,39 @@ impl StdOutPrinterBuilder {
                 group_by_target: true,
             },
             receiver,
+            matcher: None,
         }
     }
 
-    pub(crate) fn build(self) -> StdOutPrinter {
-        StdOutPrinter::new(self.receiver, self.config)
+    pub(crate) fn with_matcher(mut self, matcher: M) -> Self {
+        self.matcher = Some(matcher);
+        self
+    }
+
+    pub(crate) fn build(self) -> StdOutPrinter<M> {
+        StdOutPrinter::new(self.matcher, self.receiver, self.config)
     }
 }
 
 /// A simple printer that is just a proxy to the println! macro.
-pub(crate) struct StdOutPrinter {
+pub(crate) struct StdOutPrinter<M: Matcher> {
     config: StdOutPrinterConfig,
     receiver: mpsc::Receiver<PrintMessage>,
     file_to_matches: HashMap<String, Vec<LineResult>>,
+    matcher: Option<M>,
 }
 
-impl StdOutPrinter {
-    fn new(receiver: mpsc::Receiver<PrintMessage>, config: StdOutPrinterConfig) -> Self {
+impl<M: Matcher> StdOutPrinter<M> {
+    fn new(
+        matcher: Option<M>,
+        receiver: mpsc::Receiver<PrintMessage>,
+        config: StdOutPrinterConfig,
+    ) -> Self {
         Self {
             receiver,
             config,
             file_to_matches: HashMap::new(),
+            matcher,
         }
     }
 
@@ -83,7 +99,7 @@ impl StdOutPrinter {
         let matches_for_target = self
             .file_to_matches
             .get(name)
-            .expect("Attempt to print match results for a target that was never specified.");
+            .unwrap_or_else(|| panic!("Target {} was never specified.", name));
 
         println!("\n{}", name);
         for line_result in matches_for_target {
@@ -98,10 +114,63 @@ impl StdOutPrinter {
             "".to_owned()
         };
 
-        print!(
-            "{}{}",
-            line_num,
-            std::str::from_utf8(line_result.text()).unwrap()
-        );
+        if let Some(matcher) = &self.matcher {
+            StdOutPrinter::print_colorized(&line_num, matcher, line_result.text());
+        } else {
+            print!(
+                "{}{}",
+                line_num,
+                std::str::from_utf8(line_result.text()).unwrap()
+            );
+        }
+    }
+
+    fn print_colorized(line_num_chunk: &str, matcher: &M, text: &[u8]) {
+        let mut stdout = StandardStream::stdout(ColorChoice::Always);
+
+        // First, write the line num in green.
+        stdout
+            .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
+            .expect("Failed setting color.");
+
+        write!(&mut stdout, "{}", line_num_chunk).expect("Failed writing line num chunk.");
+
+        stdout.reset().expect("Failed to reset stdout color.");
+
+        let mut start = 0;
+        for match_range in matcher.find_matches(text) {
+            let until_match = &text[start..match_range.start];
+            let during_match = &text[match_range.start..match_range.stop];
+
+            write!(
+                &mut stdout,
+                "{}",
+                std::str::from_utf8(until_match).expect("Invalid utf8 during colorization")
+            )
+            .expect("Failure writing to stdout");
+
+            stdout
+                .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
+                .expect("Failed setting color.");
+            write!(
+                &mut stdout,
+                "{}",
+                std::str::from_utf8(during_match).expect("Invalid utf8 during colorization")
+            )
+            .expect("Failure writing to stdout");
+
+            stdout.reset().expect("Failed to reset stdout color.");
+
+            start = match_range.stop;
+        }
+
+        // print remainder after final match
+        let remainder = &text[start..];
+        write!(
+            &mut stdout,
+            "{}",
+            std::str::from_utf8(remainder).expect("Invalid utf8 during colorization")
+        )
+        .expect("Failure writing to stdout");
     }
 }
