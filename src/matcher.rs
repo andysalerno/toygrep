@@ -1,5 +1,7 @@
 use regex::bytes::{Regex, RegexBuilder};
 
+/// A trait that promises to answer a simple question:
+/// does the given slice of bytes match a specific pattern?
 pub(crate) trait Matcher: Clone + Send + Sync + Sized {
     fn is_match(&self, bytes: &[u8]) -> bool;
 }
@@ -7,12 +9,6 @@ pub(crate) trait Matcher: Clone + Send + Sync + Sized {
 #[derive(Debug, Clone)]
 pub(crate) struct RegexMatcher {
     regex: Regex,
-}
-
-impl RegexMatcher {
-    pub(crate) fn new(regex: Regex) -> Self {
-        Self { regex }
-    }
 }
 
 impl Matcher for RegexMatcher {
@@ -28,7 +24,7 @@ pub(crate) struct RegexMatcherBuilder<'a> {
 }
 
 impl<'a> RegexMatcherBuilder<'a> {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             is_case_insensitive: true,
             match_whole_word: false,
@@ -36,22 +32,22 @@ impl<'a> RegexMatcherBuilder<'a> {
         }
     }
 
-    pub fn for_pattern(mut self, pattern: &'a str) -> Self {
+    pub(crate) fn for_pattern(mut self, pattern: &'a str) -> Self {
         self.pattern = pattern;
         self
     }
 
-    pub fn case_insensitive(mut self, is_case_insensitive: bool) -> Self {
+    pub(crate) fn case_insensitive(mut self, is_case_insensitive: bool) -> Self {
         self.is_case_insensitive = is_case_insensitive;
         self
     }
 
-    pub fn match_whole_word(mut self, match_whole_word: bool) -> Self {
+    pub(crate) fn match_whole_word(mut self, match_whole_word: bool) -> Self {
         self.match_whole_word = match_whole_word;
         self
     }
 
-    pub fn build(self) -> RegexMatcher {
+    pub(crate) fn build(self) -> RegexMatcher {
         let regex = {
             let with_whole_word = if self.match_whole_word {
                 format_word_match(self.pattern)
