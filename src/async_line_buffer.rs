@@ -3,6 +3,7 @@
 use async_std::prelude::*;
 use std::collections::VecDeque;
 
+#[derive(Debug, Clone)]
 pub(crate) struct LineResult {
     line_num: usize,
     text: Vec<u8>,
@@ -231,6 +232,7 @@ where
     line_buffer: AsyncLineBuffer,
     reader: R,
     lines_read: usize,
+    is_line_nums_enabled: bool,
 }
 
 impl<R> AsyncLineBufferReader<R>
@@ -242,7 +244,13 @@ where
             reader,
             line_buffer,
             lines_read: 0,
+            is_line_nums_enabled: true,
         }
+    }
+
+    pub(crate) fn line_nums(mut self, enabled: bool) -> Self {
+        self.is_line_nums_enabled = enabled;
+        self
     }
 
     /// `None` if there are no lines remaining to read.

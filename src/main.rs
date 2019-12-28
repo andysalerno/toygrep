@@ -26,8 +26,9 @@ use async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
 use async_std::io::BufReader;
 use async_std::path::Path;
 use matcher::RegexMatcherBuilder;
-use printer::StdOutPrinterBuilder;
+use printer::threaded_printer::{ThreadedPrinterBuilder, ThreadedPrinterSender};
 use search_target::SearchTarget;
+use std::clone::Clone;
 use std::sync::mpsc;
 use std::thread;
 
@@ -49,9 +50,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build();
 
     let (sender, receiver) = mpsc::channel();
-    let mut printer = StdOutPrinterBuilder::new(receiver)
+    let mut printer = ThreadedPrinterBuilder::new(receiver)
         .with_matcher(matcher.clone())
+        .group_by_target(user_input.search_target != SearchTarget::Stdin)
         .build();
+    let printer_sender = ThreadedPrinterSender::new(sender);
 
     let printer_handle = thread::spawn(move || {
         printer.listen();
@@ -60,21 +63,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if user_input.search_target == SearchTarget::Stdin {
         let file_rdr = BufReader::new(async_std::io::stdin());
         let line_buf = AsyncLineBufferBuilder::new()
-            .with_minimum_read_size(8000)
+            .with_minimum_read_size(16_000)
             .build();
 
-        let line_rdr = AsyncLineBufferReader::new(file_rdr, line_buf);
+        let line_rdr = AsyncLineBufferReader::new(file_rdr, line_buf).line_nums(false);
 
-        search::search_via_reader(matcher, line_rdr, None, sender.clone()).await;
+        search::search_via_reader(matcher, line_rdr, None, printer_sender.clone()).await;
     } else {
         for target in user_input.search_targets {
             let path: &Path = &target;
             let matcher = matcher.clone();
-            search::search_target(path, matcher, sender.clone()).await;
+            search::search_target(path, matcher, printer_sender.clone()).await;
         }
     };
 
-    drop(sender);
+    drop(printer_sender);
 
     printer_handle
         .join()

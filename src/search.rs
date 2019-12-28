@@ -1,13 +1,13 @@
 use crate::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
 use crate::error::Result;
 use crate::matcher::Matcher;
-use crate::printer::PrintMessage;
+use crate::printer::threaded_printer::ThreadedPrinterSender;
+use crate::printer::{PrintMessage, PrinterSender};
 use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;
 use async_std::prelude::*;
 use std::sync::mpsc::channel;
-use std::sync::mpsc::Sender;
 
 // Two megabyte max memory buffer len.
 const MAX_BUFF_LEN_BYTES: usize = 2_000_000;
@@ -16,7 +16,7 @@ pub(crate) async fn search_via_reader<R, M>(
     matcher: M,
     mut buffer: AsyncLineBufferReader<R>,
     name: Option<String>,
-    printer: Sender<PrintMessage>,
+    printer: ThreadedPrinterSender,
 ) -> Result<()>
 where
     R: Read + std::marker::Unpin,
@@ -30,7 +30,7 @@ where
                 target_name: name.clone(),
                 line_result,
             };
-            printer.send(printable).expect("Failed sending to printer.");
+            printer.send(printable);
         }
     }
 
@@ -41,11 +41,13 @@ where
     Ok(())
 }
 
-pub(crate) async fn search_target<M: Matcher + 'static>(
+pub(crate) async fn search_target<M>(
     target_path: impl Into<&Path>,
     matcher: M,
-    printer: Sender<PrintMessage>,
-) {
+    printer: ThreadedPrinterSender,
+) where
+    M: Matcher + 'static,
+{
     // If the target is a file, search it.
     let target_path = target_path.into();
     if target_path.is_file().await {
@@ -61,11 +63,10 @@ pub(crate) async fn search_target<M: Matcher + 'static>(
     }
 }
 
-async fn search_directory<M: Matcher + 'static>(
-    directory_path: &Path,
-    matcher: M,
-    printer: Sender<PrintMessage>,
-) {
+async fn search_directory<M>(directory_path: &Path, matcher: M, printer: ThreadedPrinterSender)
+where
+    M: Matcher + 'static,
+{
     let (sender, receiver) = channel();
 
     sender
@@ -103,12 +104,15 @@ async fn search_directory<M: Matcher + 'static>(
     }
 }
 
-async fn search_file<M: Matcher>(
+async fn search_file<'a, F, M>(
     // TODO: should be AsRef?
-    file_path: impl Into<&Path>,
+    file_path: F,
     matcher: M,
-    printer: Sender<PrintMessage>,
-) {
+    printer: ThreadedPrinterSender,
+) where
+    F: Into<&'a Path>,
+    M: Matcher + 'static,
+{
     let path = file_path.into();
     let file = File::open(path).await.expect("failed opening file");
     let file_size_bytes = fs::metadata(path)
@@ -122,7 +126,7 @@ async fn search_file<M: Matcher>(
     let line_buf = AsyncLineBufferBuilder::new()
         .with_minimum_read_size(min_read_size)
         .build();
-    let line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf);
+    let line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf).line_nums(true);
 
     let target_name = Some(path.to_string_lossy().to_string());
 

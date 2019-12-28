@@ -1,176 +1,225 @@
 use crate::async_line_buffer::LineResult;
-use crate::matcher::Matcher;
-use std::collections::HashMap;
-use std::io::Write;
-use std::sync::mpsc;
-use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
+/// A trait describing the ability to "send" a message to a printer.
+pub(crate) trait PrinterSender: Clone {
+    fn send(&self, message: PrintMessage);
+}
+
+/// A message that can be sent to a printer for printing.
+#[derive(Debug, Clone)]
 pub(crate) enum PrintMessage {
+    /// A result that can be printed by a printer.
     PrintableResult {
         target_name: String,
         line_result: LineResult,
     },
-    EndOfReading {
-        target_name: String,
-    },
+
+    /// Signals to the printer that there will be no more messages for the named target.
+    EndOfReading { target_name: String },
 }
 
-struct StdOutPrinterConfig {
-    print_line_num: bool,
-    group_by_target: bool,
+mod blocking_printer {
+    use super::*;
+
+    /// A printer sender that "sends" by simply printint immediately
+    /// (and blocking while doing so).
+    #[derive(Debug, Clone)]
+    struct BlockingPrinterSender;
+
+    impl PrinterSender for BlockingPrinterSender {
+        fn send(&self, message: PrintMessage) {
+            println!("{:?}", message);
+        }
+    }
 }
 
-pub(crate) struct StdOutPrinterBuilder<M: Matcher> {
-    config: StdOutPrinterConfig,
-    receiver: mpsc::Receiver<PrintMessage>,
-    matcher: Option<M>,
-}
+pub(crate) mod threaded_printer {
+    use super::*;
+    use crate::matcher::Matcher;
+    use std::collections::HashMap;
+    use std::io::Write;
+    use std::sync::mpsc;
+    use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
-impl<M: Matcher> StdOutPrinterBuilder<M> {
-    pub(crate) fn new(receiver: mpsc::Receiver<PrintMessage>) -> Self {
-        Self {
-            config: StdOutPrinterConfig {
-                print_line_num: true,
-                group_by_target: true,
-            },
-            receiver,
-            matcher: None,
+    #[derive(Clone)]
+    pub(crate) struct ThreadedPrinterSender {
+        sender: mpsc::Sender<PrintMessage>,
+    }
+
+    impl ThreadedPrinterSender {
+        pub(crate) fn new(sender: mpsc::Sender<PrintMessage>) -> Self {
+            Self { sender }
         }
     }
 
-    pub(crate) fn with_matcher(mut self, matcher: M) -> Self {
-        self.matcher = Some(matcher);
-        self
+    impl PrinterSender for ThreadedPrinterSender {
+        fn send(&self, mut message: PrintMessage) {
+            self.sender.send(message).expect("Failed sending message.");
+        }
     }
 
-    pub(crate) fn build(self) -> StdOutPrinter<M> {
-        StdOutPrinter::new(self.matcher, self.receiver, self.config)
+    struct ThreadedPrinterConfig {
+        print_line_num: bool,
+        group_by_target: bool,
     }
-}
 
-/// A simple printer that is just a proxy to the println! macro.
-pub(crate) struct StdOutPrinter<M: Matcher> {
-    config: StdOutPrinterConfig,
-    receiver: mpsc::Receiver<PrintMessage>,
-    file_to_matches: HashMap<String, Vec<LineResult>>,
-    matcher: Option<M>,
-}
-
-impl<M: Matcher> StdOutPrinter<M> {
-    fn new(
-        matcher: Option<M>,
+    pub(crate) struct ThreadedPrinterBuilder<M: Matcher> {
+        config: ThreadedPrinterConfig,
         receiver: mpsc::Receiver<PrintMessage>,
-        config: StdOutPrinterConfig,
-    ) -> Self {
-        Self {
-            receiver,
-            config,
-            file_to_matches: HashMap::new(),
-            matcher,
-        }
+        matcher: Option<M>,
     }
 
-    pub(crate) fn listen(&mut self) {
-        while let Ok(message) = self.receiver.recv() {
-            if self.config.group_by_target {
-                match message {
-                    PrintMessage::PrintableResult {
-                        target_name,
-                        line_result,
-                    } => {
-                        if self.file_to_matches.get(&target_name).is_none() {
-                            self.file_to_matches.insert(target_name.clone(), Vec::new());
-                        }
-
-                        let line_results = self.file_to_matches.get_mut(&target_name).unwrap();
-                        line_results.push(line_result);
-                    }
-                    PrintMessage::EndOfReading { target_name } => {
-                        self.print_target_results(&target_name);
-                    }
-                }
-            } else if let PrintMessage::PrintableResult { line_result, .. } = message {
-                self.print_line_result(&line_result);
+    impl<M: Matcher> ThreadedPrinterBuilder<M> {
+        pub(crate) fn new(receiver: mpsc::Receiver<PrintMessage>) -> Self {
+            Self {
+                config: ThreadedPrinterConfig {
+                    print_line_num: true,
+                    group_by_target: true,
+                },
+                receiver,
+                matcher: None,
             }
         }
-    }
 
-    fn print_target_results(&self, name: &str) {
-        let matches_for_target = self
-            .file_to_matches
-            .get(name)
-            .unwrap_or_else(|| panic!("Target {} was never specified.", name));
+        pub(crate) fn group_by_target(mut self, should_group: bool) -> Self {
+            self.config.group_by_target = should_group;
+            self
+        }
 
-        println!("\n{}", name);
-        for line_result in matches_for_target {
-            self.print_line_result(line_result);
+        pub(crate) fn with_matcher(mut self, matcher: M) -> Self {
+            self.matcher = Some(matcher);
+            self
+        }
+
+        pub(crate) fn build(self) -> ThreadedPrinter<M> {
+            ThreadedPrinter::new(self.matcher, self.receiver, self.config)
         }
     }
 
-    fn print_line_result(&self, line_result: &LineResult) {
-        let line_num = if self.config.print_line_num {
-            format!("{}:", line_result.line_num())
-        } else {
-            "".to_owned()
-        };
-
-        if let Some(matcher) = &self.matcher {
-            StdOutPrinter::print_colorized(&line_num, matcher, line_result.text());
-        } else {
-            print!(
-                "{}{}",
-                line_num,
-                std::str::from_utf8(line_result.text()).unwrap()
-            );
-        }
+    /// A simple printer that is just a proxy to the println! macro.
+    pub(crate) struct ThreadedPrinter<M: Matcher> {
+        config: ThreadedPrinterConfig,
+        receiver: mpsc::Receiver<PrintMessage>,
+        file_to_matches: HashMap<String, Vec<LineResult>>,
+        matcher: Option<M>,
     }
 
-    fn print_colorized(line_num_chunk: &str, matcher: &M, text: &[u8]) {
-        let mut stdout = StandardStream::stdout(ColorChoice::Always);
+    impl<M: Matcher> ThreadedPrinter<M> {
+        fn new(
+            matcher: Option<M>,
+            receiver: mpsc::Receiver<PrintMessage>,
+            config: ThreadedPrinterConfig,
+        ) -> Self {
+            Self {
+                receiver,
+                config,
+                file_to_matches: HashMap::new(),
+                matcher,
+            }
+        }
 
-        // First, write the line num in green.
-        stdout
-            .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
-            .expect("Failed setting color.");
+        pub(crate) fn listen(&mut self) {
+            while let Ok(message) = self.receiver.recv() {
+                if self.config.group_by_target {
+                    match message {
+                        PrintMessage::PrintableResult {
+                            target_name,
+                            line_result,
+                        } => {
+                            if self.file_to_matches.get(&target_name).is_none() {
+                                self.file_to_matches.insert(target_name.clone(), Vec::new());
+                            }
 
-        write!(&mut stdout, "{}", line_num_chunk).expect("Failed writing line num chunk.");
+                            let line_results = self.file_to_matches.get_mut(&target_name).unwrap();
+                            line_results.push(line_result);
+                        }
+                        PrintMessage::EndOfReading { target_name } => {
+                            self.print_target_results(&target_name);
+                        }
+                    }
+                } else if let PrintMessage::PrintableResult { line_result, .. } = message {
+                    self.print_line_result(&line_result);
+                }
+            }
+        }
 
-        stdout.reset().expect("Failed to reset stdout color.");
+        fn print_target_results(&self, name: &str) {
+            let matches_for_target = self
+                .file_to_matches
+                .get(name)
+                .unwrap_or_else(|| panic!("Target {} was never specified.", name));
 
-        let mut start = 0;
-        for match_range in matcher.find_matches(text) {
-            let until_match = &text[start..match_range.start];
-            let during_match = &text[match_range.start..match_range.stop];
+            println!("\n{}", name);
+            for line_result in matches_for_target {
+                self.print_line_result(line_result);
+            }
+        }
 
-            write!(
-                &mut stdout,
-                "{}",
-                std::str::from_utf8(until_match).expect("Invalid utf8 during colorization")
-            )
-            .expect("Failure writing to stdout");
+        fn print_line_result(&self, line_result: &LineResult) {
+            let line_num = if self.config.print_line_num {
+                format!("{}:", line_result.line_num())
+            } else {
+                "".to_owned()
+            };
 
+            if let Some(matcher) = &self.matcher {
+                ThreadedPrinter::print_colorized(&line_num, matcher, line_result.text());
+            } else {
+                print!(
+                    "{}{}",
+                    line_num,
+                    std::str::from_utf8(line_result.text()).unwrap()
+                );
+            }
+        }
+
+        fn print_colorized(line_num_chunk: &str, matcher: &M, text: &[u8]) {
+            let mut stdout = StandardStream::stdout(ColorChoice::Always);
+
+            // First, write the line num in green.
             stdout
                 .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
                 .expect("Failed setting color.");
-            write!(
-                &mut stdout,
-                "{}",
-                std::str::from_utf8(during_match).expect("Invalid utf8 during colorization")
-            )
-            .expect("Failure writing to stdout");
+
+            write!(&mut stdout, "{}", line_num_chunk).expect("Failed writing line num chunk.");
 
             stdout.reset().expect("Failed to reset stdout color.");
 
-            start = match_range.stop;
-        }
+            let mut start = 0;
+            for match_range in matcher.find_matches(text) {
+                let until_match = &text[start..match_range.start];
+                let during_match = &text[match_range.start..match_range.stop];
 
-        // print remainder after final match
-        let remainder = &text[start..];
-        write!(
-            &mut stdout,
-            "{}",
-            std::str::from_utf8(remainder).expect("Invalid utf8 during colorization")
-        )
-        .expect("Failure writing to stdout");
+                write!(
+                    &mut stdout,
+                    "{}",
+                    std::str::from_utf8(until_match).expect("Invalid utf8 during colorization")
+                )
+                .expect("Failure writing to stdout");
+
+                stdout
+                    .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
+                    .expect("Failed setting color.");
+                write!(
+                    &mut stdout,
+                    "{}",
+                    std::str::from_utf8(during_match).expect("Invalid utf8 during colorization")
+                )
+                .expect("Failure writing to stdout");
+
+                stdout.reset().expect("Failed to reset stdout color.");
+
+                start = match_range.stop;
+            }
+
+            // print remainder after final match
+            let remainder = &text[start..];
+            write!(
+                &mut stdout,
+                "{}",
+                std::str::from_utf8(remainder).expect("Invalid utf8 during colorization")
+            )
+            .expect("Failure writing to stdout");
+        }
     }
 }
