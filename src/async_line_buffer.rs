@@ -4,13 +4,13 @@ use async_std::prelude::*;
 use std::collections::VecDeque;
 
 #[derive(Debug, Clone)]
-pub(crate) struct LineResult {
+pub(crate) struct LineResult<'a> {
     line_num: usize,
-    text: Vec<u8>,
+    text: &'a [u8],
 }
 
-impl LineResult {
-    fn new(text: Vec<u8>, line_num: usize) -> Self {
+impl<'a> LineResult<'a> {
+    fn new(text: &'a [u8], line_num: usize) -> Self {
         Self { line_num, text }
     }
 
@@ -256,7 +256,7 @@ where
     /// `None` if there are no lines remaining to read.
     /// `Some(Ok(...))` if a line was read and parsed successfully.
     /// `Some(Err(...))` if a line was read but failed to parse.
-    pub(crate) async fn read_line<'a>(&'a mut self) -> Option<LineResult> {
+    pub(crate) async fn read_line<'a>(&'a mut self) -> Option<LineResult<'a>> {
         self.lines_read += 1;
         let line_num = self.lines_read;
 
@@ -269,8 +269,7 @@ where
                 // we need to return it, since it will never get completed.
                 let line = self.line_buffer.consume_remaining();
 
-                //return create_result(line);
-                return line.map(|l| LineResult::new(l.into(), line_num));
+                return line.map(|l| LineResult::new(l, line_num));
             }
         }
 

@@ -2,7 +2,7 @@ use crate::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
 use crate::error::Result;
 use crate::matcher::Matcher;
 use crate::printer::threaded_printer::ThreadedPrinterSender;
-use crate::printer::{PrintMessage, PrinterSender};
+use crate::printer::{PrintMessage, PrintableResult, PrinterSender};
 use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;
@@ -26,11 +26,12 @@ where
     let name = name.unwrap_or_default();
     while let Some(line_result) = buffer.read_line().await {
         if matcher.is_match(line_result.text()) {
-            let printable = PrintMessage::PrintableResult {
-                target_name: name.clone(),
-                line_result,
-            };
-            printer.send(printable);
+            let printable = PrintableResult::new(
+                name.clone(),
+                line_result.line_num(),
+                line_result.text().into(),
+            );
+            printer.send(PrintMessage::Printable(printable));
         }
     }
 

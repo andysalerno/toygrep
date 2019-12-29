@@ -1,21 +1,39 @@
-use crate::async_line_buffer::LineResult;
-
 /// A trait describing the ability to "send" a message to a printer.
 pub(crate) trait PrinterSender: Clone {
     fn send(&self, message: PrintMessage);
 }
 
+/// A result that can be printed by a printer.
+#[derive(Debug, Clone)]
+pub(crate) struct PrintableResult {
+    target_name: String,
+    line_num: usize,
+    text: Vec<u8>,
+}
+
+impl PrintableResult {
+    pub(crate) fn new(target_name: String, line_num: usize, text: Vec<u8>) -> Self {
+        Self {
+            target_name,
+            line_num,
+            text,
+        }
+    }
+
+    fn text_as_string(self) -> String {
+        String::from_utf8(self.text).expect("Failed parsing text to utf8 in PrintableResult.")
+    }
+}
+
 /// A message that can be sent to a printer for printing.
 #[derive(Debug, Clone)]
 pub(crate) enum PrintMessage {
-    /// A result that can be printed by a printer.
-    PrintableResult {
-        target_name: String,
-        line_result: LineResult,
-    },
+    Printable(PrintableResult),
 
     /// Signals to the printer that there will be no more messages for the named target.
-    EndOfReading { target_name: String },
+    EndOfReading {
+        target_name: String,
+    },
 }
 
 mod blocking_printer {
@@ -100,7 +118,7 @@ pub(crate) mod threaded_printer {
     pub(crate) struct ThreadedPrinter<M: Matcher> {
         config: ThreadedPrinterConfig,
         receiver: mpsc::Receiver<PrintMessage>,
-        file_to_matches: HashMap<String, Vec<LineResult>>,
+        file_to_matches: HashMap<String, Vec<PrintableResult>>,
         matcher: Option<M>,
     }
 
@@ -122,54 +140,51 @@ pub(crate) mod threaded_printer {
             while let Ok(message) = self.receiver.recv() {
                 if self.config.group_by_target {
                     match message {
-                        PrintMessage::PrintableResult {
-                            target_name,
-                            line_result,
-                        } => {
-                            if self.file_to_matches.get(&target_name).is_none() {
-                                self.file_to_matches.insert(target_name.clone(), Vec::new());
+                        PrintMessage::Printable(printable) => {
+                            if self.file_to_matches.get(&printable.target_name).is_none() {
+                                self.file_to_matches
+                                    .insert(printable.target_name.clone(), Vec::new());
                             }
 
-                            let line_results = self.file_to_matches.get_mut(&target_name).unwrap();
-                            line_results.push(line_result);
+                            let line_results = self
+                                .file_to_matches
+                                .get_mut(&printable.target_name)
+                                .unwrap();
+                            line_results.push(printable);
                         }
                         PrintMessage::EndOfReading { target_name } => {
                             self.print_target_results(&target_name);
                         }
                     }
-                } else if let PrintMessage::PrintableResult { line_result, .. } = message {
-                    self.print_line_result(&line_result);
+                } else if let PrintMessage::Printable(printable) = message {
+                    self.print_line_result(printable);
                 }
             }
         }
 
-        fn print_target_results(&self, name: &str) {
+        fn print_target_results(&mut self, name: &str) {
             let matches_for_target = self
                 .file_to_matches
-                .get(name)
+                .remove(name)
                 .unwrap_or_else(|| panic!("Target {} was never specified.", name));
 
             println!("\n{}", name);
-            for line_result in matches_for_target {
-                self.print_line_result(line_result);
+            for printable in matches_for_target {
+                self.print_line_result(printable);
             }
         }
 
-        fn print_line_result(&self, line_result: &LineResult) {
+        fn print_line_result(&self, printable: PrintableResult) {
             let line_num = if self.config.print_line_num {
-                format!("{}:", line_result.line_num())
+                format!("{}:", printable.line_num)
             } else {
                 "".to_owned()
             };
 
             if let Some(matcher) = &self.matcher {
-                ThreadedPrinter::print_colorized(&line_num, matcher, line_result.text());
+                ThreadedPrinter::print_colorized(&line_num, matcher, &printable.text);
             } else {
-                print!(
-                    "{}{}",
-                    line_num,
-                    std::str::from_utf8(line_result.text()).unwrap()
-                );
+                print!("{}{}", line_num, printable.text_as_string());
             }
         }
 
