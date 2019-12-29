@@ -20,6 +20,7 @@ impl PrintableResult {
         }
     }
 
+    /// Consume `self` and convert the `text` into a utf8 `String`.
     fn text_as_string(self) -> String {
         String::from_utf8(self.text).expect("Failed parsing text to utf8 in PrintableResult.")
     }
@@ -71,7 +72,7 @@ pub(crate) mod threaded_printer {
     }
 
     impl PrinterSender for ThreadedPrinterSender {
-        fn send(&self, mut message: PrintMessage) {
+        fn send(&self, message: PrintMessage) {
             self.sender.send(message).expect("Failed sending message.");
         }
     }

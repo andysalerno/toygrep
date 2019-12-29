@@ -31,12 +31,19 @@ use search_target::SearchTarget;
 use std::clone::Clone;
 use std::sync::mpsc;
 use std::thread;
+use std::time::Instant;
 
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let user_input = {
         let args = std::env::args();
         arg_parse::capture_input(args)
+    };
+
+    let now = if user_input.stats {
+        Some(Instant::now())
+    } else {
+        None
     };
 
     if user_input.debug_enabled {
@@ -77,11 +84,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    let elapsed = now.map(|n| n.elapsed());
+
     drop(printer_sender);
 
     printer_handle
         .join()
         .expect("Failed to join the printer thread.");
+
+    if let Some(elapsed) = elapsed {
+        println!("Time to search (ms): {}", elapsed.as_millis());
+    }
 
     Ok(())
 }

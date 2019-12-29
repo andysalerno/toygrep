@@ -13,6 +13,8 @@ pub(crate) struct UserInput {
     pub(crate) case_insensitive: bool,
 
     pub(crate) search_target: SearchTarget,
+
+    pub(crate) stats: bool,
 }
 
 /// Parses the given arguments, following this expected format:
@@ -29,6 +31,7 @@ pub(crate) fn capture_input(args: impl Iterator<Item = String>) -> UserInput {
             "-i" => user_input.case_insensitive = true,
             "-w" => user_input.whole_word = true,
             "-d" => user_input.debug_enabled = true,
+            "-t" => user_input.stats = true,
             _ => {
                 panic!("Unknown flag: {}", arg);
             }
