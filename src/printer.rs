@@ -163,10 +163,7 @@ pub(crate) mod threaded_printer {
         }
 
         fn print_target_results(&mut self, name: &str) {
-            let matches_for_target = self
-                .file_to_matches
-                .remove(name)
-                .unwrap_or_else(|| panic!("Target {} was never specified.", name));
+            let matches_for_target = self.file_to_matches.remove(name).unwrap_or_default();
 
             println!("\n{}", name);
             for printable in matches_for_target {
