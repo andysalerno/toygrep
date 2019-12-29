@@ -1,4 +1,4 @@
-use crate::search_target::SearchTarget;
+use crate::target::SearchTarget;
 use async_std::path::PathBuf;
 use peeking_take_while::PeekableExt;
 

@@ -20,18 +20,18 @@ mod error;
 mod matcher;
 mod printer;
 mod search;
-mod search_target;
+mod target;
 
 use async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
 use async_std::io::BufReader;
 use async_std::path::Path;
 use matcher::RegexMatcherBuilder;
 use printer::threaded_printer::{ThreadedPrinterBuilder, ThreadedPrinterSender};
-use search_target::SearchTarget;
 use std::clone::Clone;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
+use target::SearchTarget;
 
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
