@@ -277,7 +277,7 @@ where
         // with at least one full line (which we consume below), or
         // else it has already been completely exhausted.
         let line = self.line_buffer.consume_line();
-        line.map(|l| LineResult::new(l.into(), line_num))
+        line.map(|l| LineResult::new(l, line_num))
     }
 }
 

@@ -35,10 +35,7 @@ use target::SearchTarget;
 
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let user_input = {
-        let args = std::env::args();
-        arg_parse::capture_input(args)
-    };
+    let user_input = arg_parse::capture_input(std::env::args());
 
     let now = if user_input.stats {
         Some(Instant::now())
@@ -46,26 +43,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    if user_input.debug_enabled {
-        dbg!("Targets: {:?}", &user_input.search_targets);
-    }
-
     let matcher = RegexMatcherBuilder::new()
         .for_pattern(&user_input.search_pattern)
         .case_insensitive(user_input.case_insensitive)
         .match_whole_word(user_input.whole_word)
         .build();
 
-    let (sender, receiver) = mpsc::channel();
-    let mut printer = ThreadedPrinterBuilder::new(receiver)
-        .with_matcher(matcher.clone())
-        .group_by_target(user_input.search_target != SearchTarget::Stdin)
-        .build();
-    let printer_sender = ThreadedPrinterSender::new(sender);
+    let (printer_handle, printer_sender) = {
+        let (sender, receiver) = mpsc::channel();
+        let mut printer = ThreadedPrinterBuilder::new(receiver)
+            .with_matcher(matcher.clone())
+            .group_by_target(user_input.search_target != SearchTarget::Stdin)
+            .build();
+        let printer_sender = ThreadedPrinterSender::new(sender);
 
-    let printer_handle = thread::spawn(move || {
-        printer.listen();
-    });
+        let printer_handle = thread::spawn(move || {
+            printer.listen();
+        });
+
+        (printer_handle, printer_sender)
+    };
 
     if user_input.search_target == SearchTarget::Stdin {
         let file_rdr = BufReader::new(async_std::io::stdin());

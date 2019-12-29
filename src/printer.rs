@@ -80,6 +80,7 @@ pub(crate) mod threaded_printer {
     struct ThreadedPrinterConfig {
         print_line_num: bool,
         group_by_target: bool,
+        print_immediately: bool,
     }
 
     pub(crate) struct ThreadedPrinterBuilder<M: Matcher> {
@@ -94,6 +95,7 @@ pub(crate) mod threaded_printer {
                 config: ThreadedPrinterConfig {
                     print_line_num: true,
                     group_by_target: true,
+                    print_immediately: false,
                 },
                 receiver,
                 matcher: None,
@@ -105,12 +107,23 @@ pub(crate) mod threaded_printer {
             self
         }
 
+        pub(crate) fn print_immediately(mut self, should_print_immediately: bool) -> Self {
+            self.config.print_immediately = should_print_immediately;
+            self
+        }
+
         pub(crate) fn with_matcher(mut self, matcher: M) -> Self {
             self.matcher = Some(matcher);
             self
         }
 
         pub(crate) fn build(self) -> ThreadedPrinter<M> {
+            assert!(
+                !(self.config.print_immediately && self.config.group_by_target),
+                "The current configuration is not valid -- both 'print immediately' and \
+                 'group by target' features are enabled, but when 'print immediately' \
+                 is configured, 'I can't also group by target'."
+            );
             ThreadedPrinter::new(self.matcher, self.receiver, self.config)
         }
     }
