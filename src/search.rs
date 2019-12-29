@@ -3,7 +3,6 @@ use crate::error::Result;
 use crate::matcher::Matcher;
 use crate::printer::threaded_printer::ThreadedPrinterSender;
 use crate::printer::{PrintMessage, PrintableResult, PrinterSender};
-use crate::target::Target;
 use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;
@@ -12,38 +11,6 @@ use std::sync::mpsc::channel;
 
 // Two megabyte max memory buffer len.
 const MAX_BUFF_LEN_BYTES: usize = 2_000_000;
-
-pub(crate) async fn _search<T, M, R>(
-    target: T,
-    matcher: M,
-    printer: ThreadedPrinterSender,
-) -> Result<()>
-where
-    T: Target<R>,
-    M: Matcher,
-    R: Read,
-{
-    let reader = target
-        .reader()
-        .expect("Target must have a reader to search.");
-
-    while let Some(line_result) = buffer.read_line().await {
-        if matcher.is_match(line_result.text()) {
-            let printable = PrintableResult::new(
-                name.clone(),
-                line_result.line_num(),
-                line_result.text().into(),
-            );
-            printer.send(PrintMessage::Printable(printable));
-        }
-    }
-
-    printer.send(PrintMessage::EndOfReading { target_name: name });
-
-    drop(printer);
-
-    Ok(())
-}
 
 pub(crate) async fn search_via_reader<R, M>(
     matcher: M,
