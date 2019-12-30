@@ -132,7 +132,7 @@ pub(crate) mod threaded_printer {
         }
     }
 
-    /// A simple printer that is just a proxy to the println! macro.
+    /// A simple printer that can be spawned on a separate thread.
     pub(crate) struct ThreadedPrinter<M: Matcher> {
         config: ThreadedPrinterConfig,
         receiver: mpsc::Receiver<PrintMessage>,
@@ -159,6 +159,9 @@ pub(crate) mod threaded_printer {
         }
 
         pub(crate) fn listen(&mut self) {
+            let stdout = StandardStream::stdout(ColorChoice::Auto);
+            let mut stdout = stdout.lock();
+
             let mut errors = Vec::new();
 
             while let Ok(message) = self.receiver.recv() {
@@ -178,13 +181,13 @@ pub(crate) mod threaded_printer {
                         }
                         PrintMessage::EndOfReading { target_name } => {
                             let _ = self
-                                .print_target_results(&target_name)
+                                .print_target_results(&mut stdout, &target_name)
                                 .map_err(|e| errors.push(e));
                         }
                     }
                 } else if let PrintMessage::Printable(printable) = message {
                     let _ = self
-                        .print_line_result(printable)
+                        .print_line_result(&mut stdout, printable)
                         .map_err(|e| errors.push(e));
                 }
             }
@@ -197,7 +200,10 @@ pub(crate) mod threaded_printer {
             });
         }
 
-        fn print_target_results(&mut self, name: &str) -> Result<()> {
+        fn print_target_results<W>(&mut self, writer: &mut W, name: &str) -> Result<()>
+        where
+            W: Write + WriteColor,
+        {
             // TODO: continue on error and present results in end
             let matches_for_target = self.file_to_matches.remove(name).unwrap_or_default();
 
@@ -206,15 +212,18 @@ pub(crate) mod threaded_printer {
                 return Ok(());
             }
 
-            println!("\n{}", name);
+            writeln!(writer, "\n{}", name).expect("Error writing to stdout.");
             for printable in matches_for_target {
-                self.print_line_result(printable)?;
+                self.print_line_result(writer, printable)?;
             }
 
             Ok(())
         }
 
-        fn print_line_result(&self, printable: PrintableResult) -> Result<()> {
+        fn print_line_result<W>(&self, writer: &mut W, printable: PrintableResult) -> Result<()>
+        where
+            W: Write + WriteColor,
+        {
             let line_num = if self.config.print_line_num {
                 format!("{}:", printable.line_num)
             } else {
@@ -222,17 +231,24 @@ pub(crate) mod threaded_printer {
             };
 
             if let Some(matcher) = &self.matcher {
-                ThreadedPrinter::print_colorized(&line_num, matcher, &printable);
+                ThreadedPrinter::print_colorized(&line_num, matcher, writer, &printable);
             } else {
-                print!("{}{}", line_num, printable.text_as_string()?);
+                write!(writer, "{}{}", line_num, printable.text_as_string()?)
+                    .expect("Error writing to stdout.");
             }
 
             Ok(())
         }
 
-        fn print_colorized(line_num_chunk: &str, matcher: &M, printable: &PrintableResult) {
+        fn print_colorized<W>(
+            line_num_chunk: &str,
+            matcher: &M,
+            writer: &mut W,
+            printable: &PrintableResult,
+        ) where
+            W: Write + WriteColor,
+        {
             let text = &printable.text;
-            let mut stdout = StandardStream::stdout(ColorChoice::Always);
 
             let parse_utf8 = |bytes| {
                 std::str::from_utf8(bytes)
@@ -240,13 +256,14 @@ pub(crate) mod threaded_printer {
             };
 
             // First, write the line num in green.
-            stdout
+            writer
                 .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
                 .expect("Failed setting color.");
 
-            write!(&mut stdout, "{}", line_num_chunk).expect("Failed writing line num chunk.");
+            write!(writer, "{}", line_num_chunk).expect("Failed writing line num chunk.");
 
-            stdout.reset().expect("Failed to reset stdout color.");
+            // Then, reset color to print the non-matching segment.
+            writer.reset().expect("Failed to reset stdout color.");
 
             let mut start = 0;
             for match_range in matcher.find_matches(text) {
@@ -254,22 +271,24 @@ pub(crate) mod threaded_printer {
                 let during_match = &text[match_range.start..match_range.stop];
 
                 if let Ok(text) = parse_utf8(until_match) {
-                    write!(&mut stdout, "{}", text).expect("Failure writing to stdout");
+                    write!(writer, "{}", text).expect("Failure writing to stdout");
                 } else {
                     eprintln!("Utf8 parsing error for target: {}", printable.target_name);
                 }
 
-                stdout
-                    .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
+                // The match itself is printed in red.
+                // stdout
+                writer
+                    .set_color(ColorSpec::new().set_fg(Some(Color::Red)))
                     .expect("Failed setting color.");
 
                 if let Ok(text) = parse_utf8(during_match) {
-                    write!(&mut stdout, "{}", text).expect("Failure writing to stdout");
+                    write!(writer, "{}", text).expect("Failure writing to stdout");
                 } else {
                     eprintln!("Utf8 parsing error for target: {}", printable.target_name);
                 }
 
-                stdout.reset().expect("Failed to reset stdout color.");
+                writer.reset().expect("Failed to reset stdout color.");
 
                 start = match_range.stop;
             }
@@ -278,7 +297,7 @@ pub(crate) mod threaded_printer {
             let remainder = &text[start..];
 
             if let Ok(text) = parse_utf8(remainder) {
-                write!(&mut stdout, "{}", text).expect("Failure writing to stdout");
+                write!(writer, "{}", text).expect("Failure writing to stdout");
             } else {
                 eprintln!("Utf8 parsing error for target: {}", printable.target_name);
             }
