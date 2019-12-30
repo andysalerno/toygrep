@@ -26,7 +26,7 @@ impl PrintableResult {
     /// Consume `self` and convert the `text` into a utf8 `String`.
     fn text_as_string(self) -> Result<String> {
         let target_name = self.target_name;
-        String::from_utf8(self.text).map_err(|_| Error::Utf8Error(target_name))
+        String::from_utf8(self.text).map_err(|_| Error::Utf8PrintFail(target_name))
     }
 }
 
@@ -190,7 +190,7 @@ pub(crate) mod threaded_printer {
             }
 
             errors.into_iter().for_each(|e| match e {
-                Error::Utf8Error(target) => {
+                Error::Utf8PrintFail(target) => {
                     eprintln!("Invalid Utf8 encountered while parsing: {}", target)
                 }
                 _ => eprintln!("Printer encountered an unknown error: {:?}", e),
@@ -217,7 +217,7 @@ pub(crate) mod threaded_printer {
             };
 
             if let Some(matcher) = &self.matcher {
-                ThreadedPrinter::print_colorized(&line_num, matcher, &printable.text);
+                ThreadedPrinter::print_colorized(&line_num, matcher, &printable);
             } else {
                 print!("{}{}", line_num, printable.text_as_string()?);
             }
@@ -225,8 +225,14 @@ pub(crate) mod threaded_printer {
             Ok(())
         }
 
-        fn print_colorized(line_num_chunk: &str, matcher: &M, text: &[u8]) {
+        fn print_colorized(line_num_chunk: &str, matcher: &M, printable: &PrintableResult) {
+            let text = &printable.text;
             let mut stdout = StandardStream::stdout(ColorChoice::Always);
+
+            let parse_utf8 = |bytes| {
+                std::str::from_utf8(bytes)
+                    .map_err(|_| Error::Utf8PrintFail(printable.target_name.to_owned()))
+            };
 
             // First, write the line num in green.
             stdout
@@ -242,22 +248,21 @@ pub(crate) mod threaded_printer {
                 let until_match = &text[start..match_range.start];
                 let during_match = &text[match_range.start..match_range.stop];
 
-                write!(
-                    &mut stdout,
-                    "{}",
-                    std::str::from_utf8(until_match).expect("Invalid utf8 during colorization")
-                )
-                .expect("Failure writing to stdout");
+                if let Ok(text) = parse_utf8(until_match) {
+                    write!(&mut stdout, "{}", text).expect("Failure writing to stdout");
+                } else {
+                    eprintln!("Utf8 parsing error for target: {}", printable.target_name);
+                }
 
                 stdout
                     .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
                     .expect("Failed setting color.");
-                write!(
-                    &mut stdout,
-                    "{}",
-                    std::str::from_utf8(during_match).expect("Invalid utf8 during colorization")
-                )
-                .expect("Failure writing to stdout");
+
+                if let Ok(text) = parse_utf8(during_match) {
+                    write!(&mut stdout, "{}", text).expect("Failure writing to stdout");
+                } else {
+                    eprintln!("Utf8 parsing error for target: {}", printable.target_name);
+                }
 
                 stdout.reset().expect("Failed to reset stdout color.");
 
@@ -266,12 +271,12 @@ pub(crate) mod threaded_printer {
 
             // print remainder after final match
             let remainder = &text[start..];
-            write!(
-                &mut stdout,
-                "{}",
-                std::str::from_utf8(remainder).expect("Invalid utf8 during colorization")
-            )
-            .expect("Failure writing to stdout");
+
+            if let Ok(text) = parse_utf8(remainder) {
+                write!(&mut stdout, "{}", text).expect("Failure writing to stdout");
+            } else {
+                eprintln!("Utf8 parsing error for target: {}", printable.target_name);
+            }
         }
     }
 }

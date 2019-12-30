@@ -13,6 +13,9 @@ use std::sync::mpsc::channel;
 // Two megabyte max memory buffer len.
 const MAX_BUFF_LEN_BYTES: usize = 2_000_000;
 
+// How many bytes must we check to be reasonably sure the input isn't binary?
+const BINARY_CHECK_LEN_BYTES: usize = 1024;
+
 /// Given some `Target`s, search them using the given `Matcher`
 /// and send the results to the given `Printer`.
 /// `Ok` if every target is an available file or directory (or stdin).
@@ -38,7 +41,7 @@ where
 
                 let line_rdr = AsyncLineBufferReader::new(file_rdr, line_buf).line_nums(false);
 
-                search_via_reader(matcher, line_rdr, None, printer.clone()).await;
+                search_via_reader(matcher, line_rdr, None, printer.clone()).await?;
             }
             Target::Path(path) => {
                 if path.is_file().await {
@@ -120,7 +123,14 @@ where
 
     let target_name = Some(path.to_string_lossy().to_string());
 
-    search_via_reader(matcher, line_buf_rdr, target_name, printer).await;
+    let status = search_via_reader(matcher, line_buf_rdr, target_name, printer).await;
+
+    if let Err(e) = status {
+        match e {
+            Error::BinaryFileSkip(name) => println!("Skipped binary file: {}", name),
+            _ => println!("Unknown error while searching file: {:?}", e),
+        }
+    }
 }
 
 async fn search_via_reader<R, M>(
@@ -128,13 +138,23 @@ async fn search_via_reader<R, M>(
     mut buffer: AsyncLineBufferReader<R>,
     name: Option<String>,
     printer: ThreadedPrinterSender,
-) where
+) -> Result<()>
+where
     R: Read + std::marker::Unpin,
     M: Matcher,
 {
-    // TODO: fiddle with capacity
+    let mut binary_bytes_checked = 0;
+
     let name = name.unwrap_or_default();
     while let Some(line_result) = buffer.read_line().await {
+        if binary_bytes_checked < BINARY_CHECK_LEN_BYTES {
+            if check_utf8(line_result.text()) {
+                binary_bytes_checked += line_result.text().len();
+            } else {
+                return Err(Error::BinaryFileSkip(name));
+            }
+        }
+
         if matcher.is_match(line_result.text()) {
             let printable = PrintableResult::new(
                 name.clone(),
@@ -148,4 +168,10 @@ async fn search_via_reader<R, M>(
     printer.send(PrintMessage::EndOfReading { target_name: name });
 
     drop(printer);
+
+    Ok(())
+}
+
+fn check_utf8(bytes: &[u8]) -> bool {
+    std::str::from_utf8(bytes).is_ok()
 }
