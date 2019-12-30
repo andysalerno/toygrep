@@ -26,11 +26,10 @@ use matcher::RegexMatcherBuilder;
 use printer::threaded_printer::{ThreadedPrinterBuilder, ThreadedPrinterSender};
 use std::clone::Clone;
 use std::sync::mpsc;
-use std::thread;
 use std::time::Instant;
 
 #[async_std::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
     let user_input = arg_parse::capture_input(std::env::args());
 
     let now = if user_input.stats {
@@ -48,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (printer_handle, printer_sender) = {
         let (sender, receiver) = mpsc::channel();
 
-        let mut printer = ThreadedPrinterBuilder::new(receiver)
+        let printer = ThreadedPrinterBuilder::new(receiver)
             .with_matcher(matcher.clone())
             .group_by_target(user_input.targets.len() > 1)
             .print_immediately(
@@ -58,10 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build();
 
         let printer_sender = ThreadedPrinterSender::new(sender);
-
-        let printer_handle = thread::spawn(move || {
-            printer.listen();
-        });
+        let printer_handle = printer.spawn();
 
         (printer_handle, printer_sender)
     };
@@ -79,6 +75,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(elapsed) = elapsed {
         println!("Time to search (ms): {}", elapsed.as_millis());
     }
-
-    Ok(())
 }

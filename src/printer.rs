@@ -1,3 +1,5 @@
+use std::thread;
+
 /// A trait describing the ability to "send" a message to a printer.
 pub(crate) trait PrinterSender: Clone {
     fn send(&self, message: PrintMessage);
@@ -89,7 +91,7 @@ pub(crate) mod threaded_printer {
         matcher: Option<M>,
     }
 
-    impl<M: Matcher> ThreadedPrinterBuilder<M> {
+    impl<M: Matcher + 'static> ThreadedPrinterBuilder<M> {
         pub(crate) fn new(receiver: mpsc::Receiver<PrintMessage>) -> Self {
             Self {
                 config: ThreadedPrinterConfig {
@@ -136,7 +138,7 @@ pub(crate) mod threaded_printer {
         matcher: Option<M>,
     }
 
-    impl<M: Matcher> ThreadedPrinter<M> {
+    impl<M: Matcher + 'static> ThreadedPrinter<M> {
         fn new(
             matcher: Option<M>,
             receiver: mpsc::Receiver<PrintMessage>,
@@ -148,6 +150,10 @@ pub(crate) mod threaded_printer {
                 file_to_matches: HashMap::new(),
                 matcher,
             }
+        }
+
+        pub(crate) fn spawn(mut self) -> thread::JoinHandle<()> {
+            thread::spawn(move || self.listen())
         }
 
         pub(crate) fn listen(&mut self) {

@@ -2,8 +2,8 @@ use regex::bytes::{Regex, RegexBuilder};
 
 #[derive(Debug, Clone)]
 pub(crate) struct Match {
-    pub start: usize,
-    pub stop: usize,
+    pub(crate) start: usize,
+    pub(crate) stop: usize,
 }
 
 /// A trait that promises to answer a simple question:

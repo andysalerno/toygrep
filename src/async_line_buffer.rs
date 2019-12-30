@@ -282,6 +282,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::string_lit_as_bytes)]
 mod test {
     use super::*;
     use async_std::io::BufReader;

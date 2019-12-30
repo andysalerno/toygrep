@@ -1,5 +1,4 @@
 use crate::target::Target;
-use async_std::path::PathBuf;
 use peeking_take_while::PeekableExt;
 
 #[derive(Debug, Default)]
