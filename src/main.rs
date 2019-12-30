@@ -22,6 +22,7 @@ mod printer;
 mod search;
 mod target;
 
+use crate::error::Error;
 use matcher::RegexMatcherBuilder;
 use printer::threaded_printer::{ThreadedPrinterBuilder, ThreadedPrinterSender};
 use std::clone::Clone;
@@ -62,7 +63,11 @@ async fn main() {
         (printer_handle, printer_sender)
     };
 
-    search::search_targets(&user_input.targets, matcher, printer_sender.clone()).await;
+    let status = search::search_targets(&user_input.targets, matcher, printer_sender.clone()).await;
+
+    if let Err(Error::TargetsNotFound(targets)) = status {
+        println!("Invalid targets specified: {:?}", targets);
+    }
 
     let elapsed = now.map(|n| n.elapsed());
 

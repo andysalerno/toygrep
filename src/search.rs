@@ -1,5 +1,5 @@
 use crate::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::matcher::Matcher;
 use crate::printer::threaded_printer::ThreadedPrinterSender;
 use crate::printer::{PrintMessage, PrintableResult, PrinterSender};
@@ -13,13 +13,20 @@ use std::sync::mpsc::channel;
 // Two megabyte max memory buffer len.
 const MAX_BUFF_LEN_BYTES: usize = 2_000_000;
 
+/// Given some `Target`s, search them using the given `Matcher`
+/// and send the results to the given `Printer`.
+/// `Ok` if every target is an available file or directory (or stdin).
+/// `Err` with a list of failed paths if any of the paths are invalid.
 pub(crate) async fn search_targets<M>(
     targets: &[Target],
     matcher: M,
     printer: ThreadedPrinterSender,
-) where
+) -> Result<()>
+where
     M: Matcher + 'static,
 {
+    let mut error_paths = Vec::new();
+
     for target in targets {
         let matcher = matcher.clone();
         let printer = printer.clone();
@@ -39,45 +46,17 @@ pub(crate) async fn search_targets<M>(
                 } else if path.is_dir().await {
                     search_directory(path, matcher, printer).await;
                 } else {
-                    panic!(
-                        "Couldn't find file or dir at path: {}. \
-                         Btw, this should be an Err, not a panic...",
-                        path.display()
-                    );
+                    error_paths.push(format!("{}", path.display()));
                 }
             }
         }
     }
-}
 
-async fn search_via_reader<R, M>(
-    matcher: M,
-    mut buffer: AsyncLineBufferReader<R>,
-    name: Option<String>,
-    printer: ThreadedPrinterSender,
-) -> Result<()>
-where
-    R: Read + std::marker::Unpin,
-    M: Matcher,
-{
-    // TODO: fiddle with capacity
-    let name = name.unwrap_or_default();
-    while let Some(line_result) = buffer.read_line().await {
-        if matcher.is_match(line_result.text()) {
-            let printable = PrintableResult::new(
-                name.clone(),
-                line_result.line_num(),
-                line_result.text().into(),
-            );
-            printer.send(PrintMessage::Printable(printable));
-        }
+    if error_paths.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::TargetsNotFound(error_paths))
     }
-
-    printer.send(PrintMessage::EndOfReading { target_name: name });
-
-    drop(printer);
-
-    Ok(())
 }
 
 async fn search_directory<M>(directory_path: &Path, matcher: M, printer: ThreadedPrinterSender)
@@ -142,4 +121,31 @@ where
     let target_name = Some(path.to_string_lossy().to_string());
 
     search_via_reader(matcher, line_buf_rdr, target_name, printer).await;
+}
+
+async fn search_via_reader<R, M>(
+    matcher: M,
+    mut buffer: AsyncLineBufferReader<R>,
+    name: Option<String>,
+    printer: ThreadedPrinterSender,
+) where
+    R: Read + std::marker::Unpin,
+    M: Matcher,
+{
+    // TODO: fiddle with capacity
+    let name = name.unwrap_or_default();
+    while let Some(line_result) = buffer.read_line().await {
+        if matcher.is_match(line_result.text()) {
+            let printable = PrintableResult::new(
+                name.clone(),
+                line_result.line_num(),
+                line_result.text().into(),
+            );
+            printer.send(PrintMessage::Printable(printable));
+        }
+    }
+
+    printer.send(PrintMessage::EndOfReading { target_name: name });
+
+    drop(printer);
 }

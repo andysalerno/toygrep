@@ -1,3 +1,4 @@
+use crate::error::{Error, Result};
 use std::thread;
 
 /// A trait describing the ability to "send" a message to a printer.
@@ -23,8 +24,9 @@ impl PrintableResult {
     }
 
     /// Consume `self` and convert the `text` into a utf8 `String`.
-    fn text_as_string(self) -> String {
-        String::from_utf8(self.text).expect("Failed parsing text to utf8 in PrintableResult.")
+    fn text_as_string(self) -> Result<String> {
+        let target_name = self.target_name;
+        String::from_utf8(self.text).map_err(|_| Error::Utf8Error(target_name))
     }
 }
 
@@ -157,6 +159,8 @@ pub(crate) mod threaded_printer {
         }
 
         pub(crate) fn listen(&mut self) {
+            let mut errors = Vec::new();
+
             while let Ok(message) = self.receiver.recv() {
                 if self.config.group_by_target {
                     match message {
@@ -173,25 +177,39 @@ pub(crate) mod threaded_printer {
                             line_results.push(printable);
                         }
                         PrintMessage::EndOfReading { target_name } => {
-                            self.print_target_results(&target_name);
+                            let _ = self
+                                .print_target_results(&target_name)
+                                .map_err(|e| errors.push(e));
                         }
                     }
                 } else if let PrintMessage::Printable(printable) = message {
-                    self.print_line_result(printable);
+                    let _ = self
+                        .print_line_result(printable)
+                        .map_err(|e| errors.push(e));
                 }
             }
+
+            errors.into_iter().for_each(|e| match e {
+                Error::Utf8Error(target) => {
+                    eprintln!("Invalid Utf8 encountered while parsing: {}", target)
+                }
+                _ => eprintln!("Printer encountered an unknown error: {:?}", e),
+            });
         }
 
-        fn print_target_results(&mut self, name: &str) {
+        fn print_target_results(&mut self, name: &str) -> Result<()> {
+            // TODO: continue on error and present results in end
             let matches_for_target = self.file_to_matches.remove(name).unwrap_or_default();
 
             println!("\n{}", name);
             for printable in matches_for_target {
-                self.print_line_result(printable);
+                self.print_line_result(printable)?;
             }
+
+            Ok(())
         }
 
-        fn print_line_result(&self, printable: PrintableResult) {
+        fn print_line_result(&self, printable: PrintableResult) -> Result<()> {
             let line_num = if self.config.print_line_num {
                 format!("{}:", printable.line_num)
             } else {
@@ -201,8 +219,10 @@ pub(crate) mod threaded_printer {
             if let Some(matcher) = &self.matcher {
                 ThreadedPrinter::print_colorized(&line_num, matcher, &printable.text);
             } else {
-                print!("{}{}", line_num, printable.text_as_string());
+                print!("{}{}", line_num, printable.text_as_string()?);
             }
+
+            Ok(())
         }
 
         fn print_colorized(line_num_chunk: &str, matcher: &M, text: &[u8]) {

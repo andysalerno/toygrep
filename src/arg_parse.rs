@@ -41,11 +41,11 @@ pub(crate) fn capture_input(args: impl Iterator<Item = String>) -> UserInput {
         user_input.search_pattern = pattern;
     }
 
-    if is_stdin_provided() {
-        user_input.targets = vec![Target::Stdin];
+    user_input.targets = if is_stdin_provided() {
+        vec![Target::Stdin]
     } else {
-        user_input.targets = args.map(|a| a.into()).map(Target::for_path).collect();
-    }
+        args.map(|a| a.into()).map(Target::for_path).collect()
+    };
 
     user_input
 }

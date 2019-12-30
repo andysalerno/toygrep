@@ -61,7 +61,7 @@ impl AsyncLineBufferBuilder {
 
 /// Strategy: fill as much as you can,
 ///             then read as much as you can; repeat.
-///             Line doesn't fit? Grow buffer.
+///             If a whole line doesn't fit, grow buffer.
 /// An asynchronous line buffer.
 /// If this is being used to buffer content
 /// from a file, a good strategy would be to

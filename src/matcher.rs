@@ -8,7 +8,7 @@ pub(crate) struct Match {
 
 /// A trait that promises to answer a simple question:
 /// does the given slice of bytes match a specific pattern?
-pub(crate) trait Matcher: Clone + Send + Sync + Sized {
+pub(crate) trait Matcher: Clone + Send {
     fn is_match(&self, bytes: &[u8]) -> bool;
     fn find_matches(&self, bytes: &[u8]) -> Vec<Match>;
 }
