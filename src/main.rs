@@ -68,21 +68,23 @@ async fn main() {
         (printer_handle, printer_sender)
     };
 
-    let status = search::search_targets(&user_input.targets, matcher, printer_sender.clone()).await;
-
-    if let Err(Error::TargetsNotFound(targets)) = status {
-        eprintln!("Invalid targets specified: {:?}", targets);
-    }
+    let status = search::search_targets(&user_input.targets, matcher, printer_sender).await;
 
     let elapsed = now.map(|n| n.elapsed());
-
-    drop(printer_sender);
 
     printer_handle
         .join()
         .expect("Failed to join the printer thread.");
 
+    if let Err(Error::TargetsNotFound(targets)) = status {
+        eprintln!("\nInvalid targets specified: {:?}", targets);
+    }
+
     if let Some(elapsed) = elapsed {
         println!("Time to search (ms): {}", elapsed.as_millis());
+        println!(
+            "    Total time (ms): {}",
+            now.unwrap().elapsed().as_millis()
+        );
     }
 }
