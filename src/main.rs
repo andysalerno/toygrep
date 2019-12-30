@@ -71,7 +71,7 @@ async fn main() {
     let status = search::search_targets(&user_input.targets, matcher, printer_sender.clone()).await;
 
     if let Err(Error::TargetsNotFound(targets)) = status {
-        println!("Invalid targets specified: {:?}", targets);
+        eprintln!("Invalid targets specified: {:?}", targets);
     }
 
     let elapsed = now.map(|n| n.elapsed());
