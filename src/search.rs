@@ -14,7 +14,7 @@ use std::sync::mpsc::channel;
 const MAX_BUFF_LEN_BYTES: usize = 2_000_000;
 
 // How many bytes must we check to be reasonably sure the input isn't binary?
-const BINARY_CHECK_LEN_BYTES: usize = 1024;
+const BINARY_CHECK_LEN_BYTES: usize = 512;
 
 /// Given some `Target`s, search them using the given `Matcher`
 /// and send the results to the given `Printer`.
@@ -127,8 +127,9 @@ where
 
     if let Err(e) = status {
         match e {
-            Error::BinaryFileSkip(name) => println!("Skipped binary file: {}", name),
-            _ => println!("Unknown error while searching file: {:?}", e),
+            // A binary file skip error is expected and can be ignored.
+            Error::BinaryFileSkip(_) => {}
+            _ => eprintln!("Unknown error while searching file: {:?}", e),
         }
     }
 }

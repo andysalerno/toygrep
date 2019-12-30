@@ -48,13 +48,18 @@ async fn main() {
     let (printer_handle, printer_sender) = {
         let (sender, receiver) = mpsc::channel();
 
+        let first_target = user_input.targets.first();
+
+        let print_immediately =
+            user_input.targets.len() == 1 && first_target.unwrap().is_file().await;
+
+        let group_by_target = user_input.targets.len() > 1
+            || (first_target.is_some() && first_target.unwrap().is_dir().await);
+
         let printer = ThreadedPrinterBuilder::new(receiver)
             .with_matcher(matcher.clone())
-            .group_by_target(user_input.targets.len() > 1)
-            .print_immediately(
-                user_input.targets.len() == 1
-                    && user_input.targets.first().unwrap().is_file().await,
-            )
+            .group_by_target(group_by_target)
+            .print_immediately(print_immediately)
             .build();
 
         let printer_sender = ThreadedPrinterSender::new(sender);

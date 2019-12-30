@@ -201,6 +201,11 @@ pub(crate) mod threaded_printer {
             // TODO: continue on error and present results in end
             let matches_for_target = self.file_to_matches.remove(name).unwrap_or_default();
 
+            if matches_for_target.is_empty() {
+                // Nothing to do.
+                return Ok(());
+            }
+
             println!("\n{}", name);
             for printable in matches_for_target {
                 self.print_line_result(printable)?;
