@@ -22,16 +22,12 @@ mod printer;
 mod search;
 mod target;
 
-use async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
-use async_std::io::BufReader;
-use async_std::path::Path;
 use matcher::RegexMatcherBuilder;
 use printer::threaded_printer::{ThreadedPrinterBuilder, ThreadedPrinterSender};
 use std::clone::Clone;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
-use target::SearchTarget;
 
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -51,10 +47,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (printer_handle, printer_sender) = {
         let (sender, receiver) = mpsc::channel();
+
         let mut printer = ThreadedPrinterBuilder::new(receiver)
             .with_matcher(matcher.clone())
-            .group_by_target(user_input.search_target != SearchTarget::Stdin)
+            .group_by_target(user_input.targets.len() > 1)
+            .print_immediately(
+                user_input.targets.len() == 1
+                    && user_input.targets.first().unwrap().is_file().await,
+            )
             .build();
+
         let printer_sender = ThreadedPrinterSender::new(sender);
 
         let printer_handle = thread::spawn(move || {
@@ -64,22 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         (printer_handle, printer_sender)
     };
 
-    if user_input.search_target == SearchTarget::Stdin {
-        let file_rdr = BufReader::new(async_std::io::stdin());
-        let line_buf = AsyncLineBufferBuilder::new()
-            .with_minimum_read_size(16_000)
-            .build();
-
-        let line_rdr = AsyncLineBufferReader::new(file_rdr, line_buf).line_nums(false);
-
-        search::search_via_reader(matcher, line_rdr, None, printer_sender.clone()).await;
-    } else {
-        for target in user_input.search_targets {
-            let path: &Path = &target;
-            let matcher = matcher.clone();
-            search::search_target(path, matcher, printer_sender.clone()).await;
-        }
-    };
+    search::search_targets(&user_input.targets, matcher, printer_sender.clone()).await;
 
     let elapsed = now.map(|n| n.elapsed());
 

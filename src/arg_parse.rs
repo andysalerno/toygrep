@@ -1,4 +1,4 @@
-use crate::target::SearchTarget;
+use crate::target::Target;
 use async_std::path::PathBuf;
 use peeking_take_while::PeekableExt;
 
@@ -7,12 +7,11 @@ pub(crate) struct UserInput {
     pub(crate) debug_enabled: bool,
 
     pub(crate) search_pattern: String,
-    pub(crate) search_targets: Vec<PathBuf>,
 
     pub(crate) whole_word: bool,
     pub(crate) case_insensitive: bool,
 
-    pub(crate) search_target: SearchTarget,
+    pub(crate) targets: Vec<Target>,
 
     pub(crate) stats: bool,
 }
@@ -43,11 +42,10 @@ pub(crate) fn capture_input(args: impl Iterator<Item = String>) -> UserInput {
         user_input.search_pattern = pattern;
     }
 
-    // Finally, the file(s)/directory(ies) to search.
-    user_input.search_targets = args.map(|a| a.into()).collect();
-
     if is_stdin_provided() {
-        user_input.search_target = SearchTarget::Stdin;
+        user_input.targets = vec![Target::Stdin];
+    } else {
+        user_input.targets = args.map(|a| a.into()).map(Target::for_path).collect();
     }
 
     user_input

@@ -3,6 +3,7 @@ use crate::error::Result;
 use crate::matcher::Matcher;
 use crate::printer::threaded_printer::ThreadedPrinterSender;
 use crate::printer::{PrintMessage, PrintableResult, PrinterSender};
+use crate::target::Target;
 use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;
@@ -12,7 +13,44 @@ use std::sync::mpsc::channel;
 // Two megabyte max memory buffer len.
 const MAX_BUFF_LEN_BYTES: usize = 2_000_000;
 
-pub(crate) async fn search_via_reader<R, M>(
+pub(crate) async fn search_targets<M>(
+    targets: &[Target],
+    matcher: M,
+    printer: ThreadedPrinterSender,
+) where
+    M: Matcher + 'static,
+{
+    for target in targets {
+        let matcher = matcher.clone();
+        let printer = printer.clone();
+
+        match target {
+            Target::Stdin => {
+                let file_rdr = BufReader::new(async_std::io::stdin());
+                let line_buf = AsyncLineBufferBuilder::new().build();
+
+                let line_rdr = AsyncLineBufferReader::new(file_rdr, line_buf).line_nums(false);
+
+                search_via_reader(matcher, line_rdr, None, printer.clone()).await;
+            }
+            Target::Path(path) => {
+                if path.is_file().await {
+                    search_file(path, matcher, printer).await;
+                } else if path.is_dir().await {
+                    search_directory(path, matcher, printer).await;
+                } else {
+                    panic!(
+                        "Couldn't find file or dir at path: {}. \
+                         Btw, this should be an Err, not a panic...",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
+}
+
+async fn search_via_reader<R, M>(
     matcher: M,
     mut buffer: AsyncLineBufferReader<R>,
     name: Option<String>,
@@ -40,28 +78,6 @@ where
     drop(printer);
 
     Ok(())
-}
-
-pub(crate) async fn search_target<M>(
-    target_path: impl Into<&Path>,
-    matcher: M,
-    printer: ThreadedPrinterSender,
-) where
-    M: Matcher + 'static,
-{
-    // If the target is a file, search it.
-    let target_path = target_path.into();
-    if target_path.is_file().await {
-        search_file(target_path, matcher, printer).await;
-    } else if target_path.is_dir().await {
-        // If it's a directory, recurse into it and search all its contents.
-        search_directory(target_path, matcher, printer).await;
-    } else {
-        panic!(
-            "Couldn't find file or dir at path: {}. Btw, this should be an Err, not a panic...",
-            target_path.display()
-        );
-    }
 }
 
 async fn search_directory<M>(directory_path: &Path, matcher: M, printer: ThreadedPrinterSender)
@@ -105,12 +121,10 @@ where
     }
 }
 
-async fn search_file<'a, F, M>(file_path: F, matcher: M, printer: ThreadedPrinterSender)
+async fn search_file<'a, M>(path: &Path, matcher: M, printer: ThreadedPrinterSender)
 where
-    F: Into<&'a Path>,
     M: Matcher + 'static,
 {
-    let path = file_path.into();
     let file = File::open(path).await.expect("failed opening file");
     let file_size_bytes = fs::metadata(path)
         .await
