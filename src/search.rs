@@ -8,7 +8,7 @@ use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;
 use async_std::prelude::*;
-use std::sync::mpsc::channel;
+use std::collections::VecDeque;
 
 // Two megabyte max memory buffer len.
 const MAX_BUFF_LEN_BYTES: usize = 2_000_000;
@@ -66,15 +66,13 @@ async fn search_directory<M>(directory_path: &Path, matcher: M, printer: Threade
 where
     M: Matcher + 'static,
 {
-    let (sender, receiver) = channel();
+    let mut dir_walk = VecDeque::new();
 
-    sender
-        .send(directory_path.to_path_buf())
-        .expect("Failure establishing sync channel.");
+    dir_walk.push_back(directory_path.to_path_buf());
 
     let mut spawned_tasks = Vec::new();
 
-    for dir_path in receiver.try_iter() {
+    while let Some(dir_path) = dir_walk.pop_front() {
         let mut dir_children = fs::read_dir(dir_path).await.expect("Failed to read dir.");
 
         while let Some(dir_child) = dir_children.next().await {
@@ -91,9 +89,7 @@ where
 
                 spawned_tasks.push(task);
             } else if dir_child.is_dir().await {
-                sender
-                    .send(dir_child)
-                    .expect("Failure sending over sync channel.");
+                dir_walk.push_back(dir_child);
             }
         }
     }
