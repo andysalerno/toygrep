@@ -10,8 +10,9 @@ use async_std::path::Path;
 use async_std::prelude::*;
 use std::collections::VecDeque;
 
-// Two megabyte max memory buffer len.
-const MAX_BUFF_LEN_BYTES: usize = 2_000_000;
+// Buffers for files will be created with at least enough room to hold the
+// whole file -- up until this maximum.
+const MAX_BUFF_START_LEN: usize = 1_000_000;
 
 // How many bytes must we check to be reasonably sure the input isn't binary?
 const BINARY_CHECK_LEN_BYTES: usize = 512;
@@ -110,7 +111,7 @@ where
         .len();
     let rdr = BufReader::new(file);
 
-    let min_read_size = usize::min(file_size_bytes as usize + 512, MAX_BUFF_LEN_BYTES);
+    let min_read_size = usize::min(file_size_bytes as usize + 512, MAX_BUFF_START_LEN);
 
     let line_buf = AsyncLineBufferBuilder::new()
         .with_minimum_read_size(min_read_size)
