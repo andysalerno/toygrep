@@ -23,6 +23,7 @@ mod search;
 mod target;
 
 use crate::error::Error;
+use crate::search::SearcherBuilder;
 use matcher::RegexMatcherBuilder;
 use printer::threaded_printer::{ThreadedPrinterBuilder, ThreadedPrinterSender};
 use std::clone::Clone;
@@ -68,7 +69,10 @@ async fn main() {
         (printer_handle, printer_sender)
     };
 
-    let status = search::search_targets(&user_input.targets, matcher, printer_sender).await;
+    let status = {
+        let searcher = SearcherBuilder::new(matcher, printer_sender).build();
+        searcher.search(&user_input.targets).await
+    };
 
     let elapsed = now.map(|n| n.elapsed());
 

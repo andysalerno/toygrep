@@ -39,6 +39,9 @@ pub(crate) enum PrintMessage {
     EndOfReading {
         target_name: String,
     },
+
+    /// Simply a string for displaying.
+    Display(String),
 }
 
 mod blocking_printer {
@@ -167,6 +170,9 @@ pub(crate) mod threaded_printer {
             while let Ok(message) = self.receiver.recv() {
                 if self.config.group_by_target {
                     match message {
+                        PrintMessage::Display(msg) => {
+                            write!(&mut stdout, "{}", msg).expect("Failed writing tou stdout.");
+                        }
                         PrintMessage::Printable(printable) => {
                             if self.file_to_matches.get(&printable.target_name).is_none() {
                                 self.file_to_matches

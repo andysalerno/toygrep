@@ -9,6 +9,7 @@ use async_std::io::{BufReader, Read};
 use async_std::path::Path;
 use async_std::prelude::*;
 use std::collections::VecDeque;
+use std::time::Instant;
 
 // Buffers for files will be created with at least enough room to hold the
 // whole file -- up until this maximum.
@@ -17,157 +18,187 @@ const MAX_BUFF_START_LEN: usize = 1_000_000;
 // How many bytes must we check to be reasonably sure the input isn't binary?
 const BINARY_CHECK_LEN_BYTES: usize = 512;
 
-/// Given some `Target`s, search them using the given `Matcher`
-/// and send the results to the given `Printer`.
-/// `Ok` if every target is an available file or directory (or stdin).
-/// `Err` with a list of failed paths if any of the paths are invalid.
-pub(crate) async fn search_targets<M>(
-    targets: &[Target],
+pub(crate) struct SearcherBuilder<M> {
     matcher: M,
     printer: ThreadedPrinterSender,
-) -> Result<()>
+}
+
+impl<M> SearcherBuilder<M>
 where
     M: Matcher + 'static,
 {
-    let mut error_paths = Vec::new();
+    pub(crate) fn new(matcher: M, printer: ThreadedPrinterSender) -> SearcherBuilder<M> {
+        Self { matcher, printer }
+    }
 
-    for target in targets {
-        let matcher = matcher.clone();
-        let printer = printer.clone();
+    pub(crate) fn build(self) -> Searcher<M> {
+        Searcher::new(self.matcher, self.printer)
+    }
+}
 
-        match target {
-            Target::Stdin => {
-                let file_rdr = BufReader::new(async_std::io::stdin());
-                let line_buf = AsyncLineBufferBuilder::new().build();
+pub(crate) struct Searcher<M>
+where
+    M: Matcher + 'static,
+{
+    matcher: M,
+    printer: ThreadedPrinterSender,
+}
 
-                let line_rdr = AsyncLineBufferReader::new(file_rdr, line_buf).line_nums(false);
+impl<M> Searcher<M>
+where
+    M: Matcher + 'static,
+{
+    fn new(matcher: M, printer: ThreadedPrinterSender) -> Self {
+        Self { matcher, printer }
+    }
 
-                search_via_reader(matcher, line_rdr, None, printer.clone()).await?;
-            }
-            Target::Path(path) => {
-                if path.is_file().await {
-                    search_file(path, matcher, printer).await;
-                } else if path.is_dir().await {
-                    search_directory(path, matcher, printer).await;
-                } else {
-                    error_paths.push(format!("{}", path.display()));
+    /// Given some `Target`s, search them using the given `Matcher`
+    /// and send the results to the given `Printer`.
+    /// `Ok` if every target is an available file or directory (or stdin).
+    /// `Err` with a list of failed paths if any of the paths are invalid.
+    pub(crate) async fn search(&self, targets: &'_ [Target]) -> Result<()> {
+        let mut error_paths = Vec::new();
+
+        for target in targets {
+            let matcher = self.matcher.clone();
+            let printer = self.printer.clone();
+
+            match target {
+                Target::Stdin => {
+                    let file_rdr = BufReader::new(async_std::io::stdin());
+                    let line_buf = AsyncLineBufferBuilder::new().build();
+
+                    let line_rdr = AsyncLineBufferReader::new(file_rdr, line_buf).line_nums(false);
+
+                    Searcher::search_via_reader(matcher, line_rdr, None, printer.clone()).await?;
+                }
+                Target::Path(path) => {
+                    if path.is_file().await {
+                        Searcher::search_file(path, matcher, printer).await;
+                    } else if path.is_dir().await {
+                        Searcher::search_directory(path, matcher, printer).await;
+                    } else {
+                        error_paths.push(format!("{}", path.display()));
+                    }
                 }
             }
         }
+
+        if error_paths.is_empty() {
+            Ok(())
+        } else {
+            panic!("debug")
+            // Err(Error::TargetsNotFound(error_paths))
+        }
     }
 
-    if error_paths.is_empty() {
+    async fn search_via_reader<R>(
+        matcher: M,
+        mut buffer: AsyncLineBufferReader<R>,
+        name: Option<String>,
+        printer: ThreadedPrinterSender,
+    ) -> Result<()>
+    where
+        R: Read + std::marker::Unpin,
+    {
+        let mut binary_bytes_checked = 0;
+
+        let name = name.unwrap_or_default();
+        while let Some(line_result) = buffer.read_line().await {
+            if binary_bytes_checked < BINARY_CHECK_LEN_BYTES {
+                if check_utf8(line_result.text()) {
+                    binary_bytes_checked += line_result.text().len();
+                } else {
+                    return Err(Error::BinaryFileSkip(name));
+                }
+            }
+
+            if matcher.is_match(line_result.text()) {
+                let printable = PrintableResult::new(
+                    name.clone(),
+                    line_result.line_num(),
+                    line_result.text().into(),
+                );
+                printer.send(PrintMessage::Printable(printable));
+            }
+        }
+
+        printer.send(PrintMessage::EndOfReading { target_name: name });
+
+        drop(printer);
+
         Ok(())
-    } else {
-        Err(Error::TargetsNotFound(error_paths))
     }
-}
 
-async fn search_directory<M>(directory_path: &Path, matcher: M, printer: ThreadedPrinterSender)
-where
-    M: Matcher + 'static,
-{
-    let mut dir_walk = VecDeque::new();
+    async fn search_file(path: &Path, matcher: M, printer: ThreadedPrinterSender) {
+        let file = File::open(path).await.expect("failed opening file");
+        let file_size_bytes = fs::metadata(path)
+            .await
+            .expect("failed getting metadata")
+            .len();
+        let rdr = BufReader::new(file);
 
-    dir_walk.push_back(directory_path.to_path_buf());
+        let min_read_size = usize::min(file_size_bytes as usize + 512, MAX_BUFF_START_LEN);
 
-    let mut spawned_tasks = Vec::new();
+        let line_buf = AsyncLineBufferBuilder::new()
+            .with_minimum_read_size(min_read_size)
+            .build();
+        let line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf).line_nums(true);
 
-    while let Some(dir_path) = dir_walk.pop_front() {
-        let mut dir_children = fs::read_dir(dir_path).await.expect("Failed to read dir.");
+        let target_name = Some(path.to_string_lossy().to_string());
 
-        while let Some(dir_child) = dir_children.next().await {
-            let dir_child = dir_child.expect("Failed to make dir child.").path();
+        let status = Searcher::search_via_reader(matcher, line_buf_rdr, target_name, printer).await;
 
-            if dir_child.is_file().await {
-                let printer = printer.clone();
-                let matcher = matcher.clone();
-
-                let task = async_std::task::spawn(async move {
-                    let dir_child_path: &Path = &dir_child;
-                    search_file(dir_child_path, matcher, printer).await;
-                });
-
-                spawned_tasks.push(task);
-            } else if dir_child.is_dir().await {
-                dir_walk.push_back(dir_child);
+        if let Err(e) = status {
+            match e {
+                // A binary file skip error is expected and can be ignored.
+                Error::BinaryFileSkip(_) => {}
+                _ => eprintln!("Unknown error while searching file: {:?}", e),
             }
         }
     }
 
-    for task in spawned_tasks {
-        task.await;
-    }
-}
+    async fn search_directory(directory_path: &Path, matcher: M, printer: ThreadedPrinterSender) {
+        let start = Instant::now();
 
-async fn search_file<'a, M>(path: &Path, matcher: M, printer: ThreadedPrinterSender)
-where
-    M: Matcher + 'static,
-{
-    let file = File::open(path).await.expect("failed opening file");
-    let file_size_bytes = fs::metadata(path)
-        .await
-        .expect("failed getting metadata")
-        .len();
-    let rdr = BufReader::new(file);
+        let mut dir_walk = VecDeque::new();
 
-    let min_read_size = usize::min(file_size_bytes as usize + 512, MAX_BUFF_START_LEN);
+        dir_walk.push_back(directory_path.to_path_buf());
 
-    let line_buf = AsyncLineBufferBuilder::new()
-        .with_minimum_read_size(min_read_size)
-        .build();
-    let line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf).line_nums(true);
+        let mut spawned_tasks = Vec::new();
 
-    let target_name = Some(path.to_string_lossy().to_string());
+        while let Some(dir_path) = dir_walk.pop_front() {
+            let mut dir_children = fs::read_dir(dir_path).await.expect("Failed to read dir.");
 
-    let status = search_via_reader(matcher, line_buf_rdr, target_name, printer).await;
+            while let Some(dir_child) = dir_children.next().await {
+                let dir_child = dir_child.expect("Failed to make dir child.").path();
 
-    if let Err(e) = status {
-        match e {
-            // A binary file skip error is expected and can be ignored.
-            Error::BinaryFileSkip(_) => {}
-            _ => eprintln!("Unknown error while searching file: {:?}", e),
-        }
-    }
-}
+                if dir_child.is_file().await {
+                    let printer = printer.clone();
+                    let matcher = matcher.clone();
 
-async fn search_via_reader<R, M>(
-    matcher: M,
-    mut buffer: AsyncLineBufferReader<R>,
-    name: Option<String>,
-    printer: ThreadedPrinterSender,
-) -> Result<()>
-where
-    R: Read + std::marker::Unpin,
-    M: Matcher,
-{
-    let mut binary_bytes_checked = 0;
+                    let task = async_std::task::spawn(async move {
+                        let dir_child_path: &Path = &dir_child;
+                        Searcher::search_file(dir_child_path, matcher, printer).await;
+                    });
 
-    let name = name.unwrap_or_default();
-    while let Some(line_result) = buffer.read_line().await {
-        if binary_bytes_checked < BINARY_CHECK_LEN_BYTES {
-            if check_utf8(line_result.text()) {
-                binary_bytes_checked += line_result.text().len();
-            } else {
-                return Err(Error::BinaryFileSkip(name));
+                    spawned_tasks.push(task);
+                } else if dir_child.is_dir().await {
+                    dir_walk.push_back(dir_child);
+                }
             }
         }
 
-        if matcher.is_match(line_result.text()) {
-            let printable = PrintableResult::new(
-                name.clone(),
-                line_result.line_num(),
-                line_result.text().into(),
-            );
-            printer.send(PrintMessage::Printable(printable));
+        printer.send(PrintMessage::Display(format!(
+            "All done spawning all search tasks ({} tasks; took {} ms).\n",
+            spawned_tasks.len(),
+            start.elapsed().as_millis()
+        )));
+
+        for task in spawned_tasks {
+            task.await;
         }
     }
-
-    printer.send(PrintMessage::EndOfReading { target_name: name });
-
-    drop(printer);
-
-    Ok(())
 }
 
 fn check_utf8(bytes: &[u8]) -> bool {
