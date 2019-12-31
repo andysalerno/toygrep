@@ -6,9 +6,9 @@ use crate::printer::{PrintMessage, PrintableResult, PrinterSender};
 use crate::target::Target;
 use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
-use async_std::path::Path;
+use async_std::path::{Path, PathBuf};
 use async_std::prelude::*;
-use std::collections::VecDeque;
+use walkdir::WalkDir;
 
 // Buffers for files will be created with at least enough room to hold the
 // whole file -- up until this maximum.
@@ -67,32 +67,23 @@ async fn search_directory<M>(directory_path: &Path, matcher: M, printer: Threade
 where
     M: Matcher + 'static,
 {
-    let mut dir_walk = VecDeque::new();
-
-    dir_walk.push_back(directory_path.to_path_buf());
-
     let mut spawned_tasks = Vec::new();
 
-    while let Some(dir_path) = dir_walk.pop_front() {
-        let mut dir_children = fs::read_dir(dir_path).await.expect("Failed to read dir.");
+    for entry in WalkDir::new(directory_path) {
+        let pathbuf: PathBuf = entry.unwrap().into_path().into();
 
-        while let Some(dir_child) = dir_children.next().await {
-            let dir_child = dir_child.expect("Failed to make dir child.").path();
-
-            if dir_child.is_file().await {
-                let printer = printer.clone();
-                let matcher = matcher.clone();
-
-                let task = async_std::task::spawn(async move {
-                    let dir_child_path: &Path = &dir_child;
-                    search_file(dir_child_path, matcher, printer).await;
-                });
-
-                spawned_tasks.push(task);
-            } else if dir_child.is_dir().await {
-                dir_walk.push_back(dir_child);
-            }
+        if pathbuf.is_dir().await {
+            continue;
         }
+
+        let printer = printer.clone();
+        let matcher = matcher.clone();
+
+        let task = async_std::task::spawn(async move {
+            search_file(&pathbuf, matcher, printer).await;
+        });
+
+        spawned_tasks.push(task);
     }
 
     for task in spawned_tasks {
