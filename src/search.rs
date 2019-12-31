@@ -87,8 +87,7 @@ where
         if error_paths.is_empty() {
             Ok(())
         } else {
-            panic!("debug")
-            // Err(Error::TargetsNotFound(error_paths))
+            Err(Error::TargetsNotFound(error_paths))
         }
     }
 
