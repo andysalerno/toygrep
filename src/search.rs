@@ -18,9 +18,40 @@ const MAX_BUFF_START_LEN: usize = 1_000_000;
 // How many bytes must we check to be reasonably sure the input isn't binary?
 const BINARY_CHECK_LEN_BYTES: usize = 512;
 
+pub(crate) mod stats {
+    #[derive(Debug, Default)]
+    pub(crate) struct ReadStats {
+        /// Count of files skipped as non-utf8.
+        /// For stats coming from "single file level" reads, this is 1
+        /// if the file was skipped or 0 if it was not.
+        /// Coming from "aggregate" reads, this will be the count of all
+        /// files skiped at that level of aggregation.
+        pub(crate) skipped_files_non_utf8: usize,
+
+        /// How many bytes were checked to determine the file is or is not utf8.
+        pub(crate) non_utf8_bytes_checked: usize,
+
+        /// Count of lines that matched during reading.
+        pub(crate) lines_matched_count: usize,
+
+        /// Count of summed byte-length of lines that matched during reading.
+        pub(crate) lines_matched_bytes: usize,
+    }
+
+    impl ReadStats {
+        pub(super) fn fold_in(&mut self, other: &ReadStats) {
+            self.skipped_files_non_utf8 += other.skipped_files_non_utf8;
+            self.non_utf8_bytes_checked += other.non_utf8_bytes_checked;
+            self.lines_matched_count += other.lines_matched_count;
+            self.lines_matched_bytes += other.lines_matched_bytes;
+        }
+    }
+}
+
 pub(crate) struct SearcherBuilder<M> {
     matcher: M,
     printer: ThreadedPrinterSender,
+    stats_enabled: bool,
 }
 
 impl<M> SearcherBuilder<M>
@@ -28,11 +59,23 @@ where
     M: Matcher + 'static,
 {
     pub(crate) fn new(matcher: M, printer: ThreadedPrinterSender) -> SearcherBuilder<M> {
-        Self { matcher, printer }
+        Self {
+            matcher,
+            printer,
+            stats_enabled: false,
+        }
     }
 
     pub(crate) fn build(self) -> Searcher<M> {
-        Searcher::new(self.matcher, self.printer)
+        let mut searcher = Searcher::new(self.matcher, self.printer);
+        searcher.stats_enabled = self.stats_enabled;
+
+        searcher
+    }
+
+    pub(crate) fn stats(mut self, enabled: bool) -> Self {
+        self.stats_enabled = enabled;
+        self
     }
 }
 
@@ -42,6 +85,7 @@ where
 {
     matcher: M,
     printer: ThreadedPrinterSender,
+    stats_enabled: bool,
 }
 
 impl<M> Searcher<M>
@@ -49,43 +93,52 @@ where
     M: Matcher + 'static,
 {
     fn new(matcher: M, printer: ThreadedPrinterSender) -> Self {
-        Self { matcher, printer }
+        Self {
+            matcher,
+            printer,
+            stats_enabled: false,
+        }
     }
 
     /// Given some `Target`s, search them using the given `Matcher`
     /// and send the results to the given `Printer`.
     /// `Ok` if every target is an available file or directory (or stdin).
     /// `Err` with a list of failed paths if any of the paths are invalid.
-    pub(crate) async fn search(&self, targets: &'_ [Target]) -> Result<()> {
+    pub(crate) async fn search(&self, targets: &'_ [Target]) -> Result<stats::ReadStats> {
+        let mut agg_stats = stats::ReadStats::default();
+
         let mut error_paths = Vec::new();
 
         for target in targets {
             let matcher = self.matcher.clone();
             let printer = self.printer.clone();
 
-            match target {
+            let stats = match target {
                 Target::Stdin => {
                     let file_rdr = BufReader::new(async_std::io::stdin());
                     let line_buf = AsyncLineBufferBuilder::new().build();
 
                     let line_rdr = AsyncLineBufferReader::new(file_rdr, line_buf).line_nums(false);
 
-                    Searcher::search_via_reader(matcher, line_rdr, None, printer.clone()).await?;
+                    Searcher::search_via_reader(matcher, line_rdr, None, printer.clone()).await
                 }
                 Target::Path(path) => {
                     if path.is_file().await {
-                        Searcher::search_file(path, matcher, printer).await;
+                        Searcher::search_file(path, matcher, printer).await
                     } else if path.is_dir().await {
-                        Searcher::search_directory(path, matcher, printer).await;
+                        Searcher::search_directory(path, matcher, printer).await
                     } else {
                         error_paths.push(format!("{}", path.display()));
+                        stats::ReadStats::default()
                     }
                 }
-            }
+            };
+
+            agg_stats.fold_in(&stats);
         }
 
         if error_paths.is_empty() {
-            Ok(())
+            Ok(agg_stats)
         } else {
             Err(Error::TargetsNotFound(error_paths))
         }
@@ -96,11 +149,14 @@ where
         mut buffer: AsyncLineBufferReader<R>,
         name: Option<String>,
         printer: ThreadedPrinterSender,
-    ) -> Result<()>
+    ) -> stats::ReadStats
     where
         R: Read + std::marker::Unpin,
     {
+        use stats::ReadStats;
+
         let mut binary_bytes_checked = 0;
+        let mut stats = ReadStats::default();
 
         let name = name.unwrap_or_default();
         while let Some(line_result) = buffer.read_line().await {
@@ -108,11 +164,16 @@ where
                 if check_utf8(line_result.text()) {
                     binary_bytes_checked += line_result.text().len();
                 } else {
-                    return Err(Error::BinaryFileSkip(name));
+                    stats.non_utf8_bytes_checked = binary_bytes_checked;
+                    stats.skipped_files_non_utf8 = 1;
+                    return stats;
                 }
             }
 
             if matcher.is_match(line_result.text()) {
+                stats.lines_matched_count += 1;
+                stats.lines_matched_bytes += line_result.text().len();
+
                 let printable = PrintableResult::new(
                     name.clone(),
                     line_result.line_num(),
@@ -126,10 +187,15 @@ where
 
         drop(printer);
 
-        Ok(())
+        stats.non_utf8_bytes_checked = binary_bytes_checked;
+        stats
     }
 
-    async fn search_file(path: &Path, matcher: M, printer: ThreadedPrinterSender) {
+    async fn search_file(
+        path: &Path,
+        matcher: M,
+        printer: ThreadedPrinterSender,
+    ) -> stats::ReadStats {
         let file = File::open(path).await.expect("failed opening file");
         let file_size_bytes = fs::metadata(path)
             .await
@@ -146,19 +212,17 @@ where
 
         let target_name = Some(path.to_string_lossy().to_string());
 
-        let status = Searcher::search_via_reader(matcher, line_buf_rdr, target_name, printer).await;
-
-        if let Err(e) = status {
-            match e {
-                // A binary file skip error is expected and can be ignored.
-                Error::BinaryFileSkip(_) => {}
-                _ => eprintln!("Unknown error while searching file: {:?}", e),
-            }
-        }
+        Searcher::search_via_reader(matcher, line_buf_rdr, target_name, printer).await
     }
 
-    async fn search_directory(directory_path: &Path, matcher: M, printer: ThreadedPrinterSender) {
+    async fn search_directory(
+        directory_path: &Path,
+        matcher: M,
+        printer: ThreadedPrinterSender,
+    ) -> stats::ReadStats {
         let start = Instant::now();
+
+        let mut agg_stats = stats::ReadStats::default();
 
         let mut dir_walk = VecDeque::new();
 
@@ -178,7 +242,7 @@ where
 
                     let task = async_std::task::spawn(async move {
                         let dir_child_path: &Path = &dir_child;
-                        Searcher::search_file(dir_child_path, matcher, printer).await;
+                        Searcher::search_file(dir_child_path, matcher, printer).await
                     });
 
                     spawned_tasks.push(task);
@@ -195,8 +259,11 @@ where
         )));
 
         for task in spawned_tasks {
-            task.await;
+            let read_stats = task.await;
+            agg_stats.fold_in(&read_stats);
         }
+
+        agg_stats
     }
 }
 
