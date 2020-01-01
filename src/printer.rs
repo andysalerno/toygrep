@@ -1,5 +1,7 @@
 use crate::error::{Error, Result};
+use crate::time_log::TimeLog;
 use std::thread;
+use std::time::Instant;
 
 /// A trait describing the ability to "send" a message to a printer.
 pub(crate) trait PrinterSender: Clone {
@@ -157,17 +159,30 @@ pub(crate) mod threaded_printer {
             }
         }
 
-        pub(crate) fn spawn(mut self) -> thread::JoinHandle<()> {
+        pub(crate) fn spawn(mut self) -> thread::JoinHandle<TimeLog> {
             thread::spawn(move || self.listen())
         }
 
-        pub(crate) fn listen(&mut self) {
+        pub(crate) fn listen(&mut self) -> TimeLog {
             let stdout = StandardStream::stdout(ColorChoice::Auto);
             let mut stdout = stdout.lock();
 
             let mut errors = Vec::new();
 
+            // At first, the instant represents 'spawn-to-first-print'.
+            let spawn_to_print_instant = Instant::now();
+            // Bit of a hack -- not using `instant` the intended way here.
+            let mut time_log = TimeLog::new(spawn_to_print_instant);
+
+            let mut first_print_instant = None;
+            let mut first_result_to_first_print = None;
             while let Ok(message) = self.receiver.recv() {
+                if time_log.printer_spawn_to_print.is_none() {
+                    time_log.printer_spawn_to_print = Some(spawn_to_print_instant.elapsed());
+                    // Restart instant for logging first-print-to-last.
+                    first_print_instant = Some(Instant::now());
+                }
+
                 if self.config.group_by_target {
                     match message {
                         PrintMessage::Display(msg) => {
@@ -186,6 +201,11 @@ pub(crate) mod threaded_printer {
                             line_results.push(printable);
                         }
                         PrintMessage::EndOfReading { target_name } => {
+                            if first_result_to_first_print.is_none() {
+                                first_result_to_first_print =
+                                    Some(first_print_instant.unwrap().elapsed());
+                            }
+
                             let _ = self
                                 .print_target_results(&mut stdout, &target_name)
                                 .map_err(|e| errors.push(e));
@@ -198,12 +218,17 @@ pub(crate) mod threaded_printer {
                 }
             }
 
+            time_log.print_duration = first_print_instant.map(|i| i.elapsed());
+            time_log.first_result_to_first_print = first_result_to_first_print;
+
             errors.into_iter().for_each(|e| match e {
                 Error::Utf8PrintFail(target) => {
                     eprintln!("Invalid Utf8 encountered while parsing: {}", target)
                 }
                 _ => eprintln!("Printer encountered an unknown error: {:?}", e),
             });
+
+            time_log
         }
 
         fn print_target_results<W>(&mut self, writer: &mut W, name: &str) -> Result<()>

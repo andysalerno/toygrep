@@ -3,8 +3,6 @@ use peeking_take_while::PeekableExt;
 
 #[derive(Debug, Default)]
 pub(crate) struct UserInput {
-    pub(crate) debug_enabled: bool,
-
     pub(crate) search_pattern: String,
 
     pub(crate) whole_word: bool,
@@ -29,7 +27,6 @@ pub(crate) fn capture_input(args: impl Iterator<Item = String>) -> UserInput {
         match arg.as_str() {
             "-i" => user_input.case_insensitive = true,
             "-w" => user_input.whole_word = true,
-            "-d" => user_input.debug_enabled = true,
             "-t" => user_input.stats = true,
             _ => {
                 panic!("Unknown flag: {}", arg);

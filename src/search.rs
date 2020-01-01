@@ -19,8 +19,13 @@ const MAX_BUFF_START_LEN: usize = 1_000_000;
 const BINARY_CHECK_LEN_BYTES: usize = 512;
 
 pub(crate) mod stats {
+
     #[derive(Debug, Default)]
     pub(crate) struct ReadStats {
+        /// The count of total files encountered during search.
+        /// Includes skipped non-utf8 files.
+        pub(crate) total_files_visited: usize,
+
         /// Count of files skipped as non-utf8.
         /// For stats coming from "single file level" reads, this is 1
         /// if the file was skipped or 0 if it was not.
@@ -40,6 +45,7 @@ pub(crate) mod stats {
 
     impl ReadStats {
         pub(super) fn fold_in(&mut self, other: &ReadStats) {
+            self.total_files_visited += other.total_files_visited;
             self.skipped_files_non_utf8 += other.skipped_files_non_utf8;
             self.non_utf8_bytes_checked += other.non_utf8_bytes_checked;
             self.lines_matched_count += other.lines_matched_count;
@@ -158,6 +164,9 @@ where
         let mut binary_bytes_checked = 0;
         let mut stats = ReadStats::default();
 
+        // This is the lowest level of granularity -- we are searching 1 file.
+        stats.total_files_visited = 1;
+
         let name = name.unwrap_or_default();
         while let Some(line_result) = buffer.read_line().await {
             if binary_bytes_checked < BINARY_CHECK_LEN_BYTES {
@@ -188,6 +197,7 @@ where
         drop(printer);
 
         stats.non_utf8_bytes_checked = binary_bytes_checked;
+
         stats
     }
 
