@@ -27,6 +27,7 @@ use crate::search::SearcherBuilder;
 use matcher::RegexMatcherBuilder;
 use printer::threaded_printer::{ThreadedPrinterBuilder, ThreadedPrinterSender};
 use std::clone::Clone;
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Instant;
 
@@ -39,6 +40,11 @@ async fn main() {
     } else {
         None
     };
+
+    if user_input.search_pattern.is_empty() {
+        print_help();
+        return;
+    }
 
     let matcher = RegexMatcherBuilder::new()
         .for_pattern(&user_input.search_pattern)
@@ -91,4 +97,24 @@ async fn main() {
             now.unwrap().elapsed().as_millis()
         );
     }
+}
+
+fn print_help() {
+    let exec_name: String = {
+        let canonical = PathBuf::from(std::env::args().next().unwrap());
+        let os_str = canonical.file_name().unwrap();
+        os_str.to_string_lossy().into()
+    };
+
+    print!(
+        "Usage:
+{} [OPTION]... PATTERN [FILE]...
+    Options:
+    -i      Case insensitive match.
+    -w      Match whole word.
+    -d      Print debug info with output.
+    -t      Print statistical information with output.
+",
+        exec_name
+    );
 }

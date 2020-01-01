@@ -20,6 +20,7 @@ pub(crate) struct UserInput {
 pub(crate) fn capture_input(args: impl Iterator<Item = String>) -> UserInput {
     let mut user_input = UserInput::default();
 
+    // Skip the first arg (executable name).
     let mut args = args.skip(1).peekable();
 
     // Flags come first.
@@ -46,6 +47,11 @@ pub(crate) fn capture_input(args: impl Iterator<Item = String>) -> UserInput {
     } else {
         args.map(|a| a.into()).map(Target::for_path).collect()
     };
+
+    if user_input.targets.is_empty() {
+        let current_dir = std::env::current_dir().expect("Unable to access the current directory.");
+        user_input.targets = vec![Target::for_path(current_dir.into())];
+    }
 
     user_input
 }
