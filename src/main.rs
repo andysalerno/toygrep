@@ -106,15 +106,14 @@ fn print_help() {
         os_str.to_string_lossy().into()
     };
 
-    print!(
+    println!(
         "Usage:
 {} [OPTION]... PATTERN [FILE]...
     Options:
     -i      Case insensitive match.
     -w      Match whole word.
     -d      Print debug info with output.
-    -t      Print statistical information with output.
-",
+    -t      Print statistical information with output.",
         exec_name
     );
 }
