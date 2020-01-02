@@ -45,6 +45,11 @@ pub(crate) mod stats {
 
         /// The duration of time spent recursing through the filesystem.
         pub(crate) filesystem_walk_dur: Duration,
+
+        /// The duration of time spent searching a reader.
+        /// Might be an aggregated time (if the returning method searches multiple readers)
+        /// or a time for only one reader (if the returning method only searches one reader).
+        pub(crate) reader_search_dur: Duration,
     }
 
     impl ReadStats {
@@ -55,6 +60,7 @@ pub(crate) mod stats {
             self.lines_matched_count += other.lines_matched_count;
             self.lines_matched_bytes += other.lines_matched_bytes;
             self.filesystem_walk_dur += other.filesystem_walk_dur;
+            self.reader_search_dur += other.reader_search_dur;
         }
     }
 }
@@ -148,6 +154,8 @@ where
     {
         use stats::ReadStats;
 
+        let start = Instant::now();
+
         let mut binary_bytes_checked = 0;
         let mut stats = ReadStats::default();
 
@@ -184,6 +192,7 @@ where
         drop(printer);
 
         stats.non_utf8_bytes_checked = binary_bytes_checked;
+        stats.reader_search_dur = start.elapsed();
 
         stats
     }
