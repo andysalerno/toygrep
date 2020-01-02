@@ -202,7 +202,16 @@ where
         matcher: M,
         printer: ThreadedPrinterSender,
     ) -> stats::ReadStats {
-        let file = File::open(path).await.expect("failed opening file");
+        let file = {
+            let f = File::open(path).await;
+
+            if let Ok(f) = f {
+                f
+            } else {
+                return stats::ReadStats::default();
+            }
+        };
+
         let file_size_bytes = fs::metadata(path)
             .await
             .expect("failed getting metadata")
@@ -237,7 +246,13 @@ where
         let mut spawned_tasks = Vec::new();
 
         while let Some(dir_path) = dir_walk.pop_front() {
-            let mut dir_children = fs::read_dir(dir_path).await.expect("Failed to read dir.");
+            let mut dir_children = {
+                if let Ok(children) = fs::read_dir(dir_path).await {
+                    children
+                } else {
+                    continue;
+                }
+            };
 
             while let Some(dir_child) = dir_children.next().await {
                 let dir_child = dir_child.expect("Failed to make dir child.").path();
