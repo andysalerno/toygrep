@@ -57,7 +57,6 @@ pub(crate) mod stats {
 pub(crate) struct SearcherBuilder<M> {
     matcher: M,
     printer: ThreadedPrinterSender,
-    stats_enabled: bool,
 }
 
 impl<M> SearcherBuilder<M>
@@ -65,23 +64,11 @@ where
     M: Matcher + 'static,
 {
     pub(crate) fn new(matcher: M, printer: ThreadedPrinterSender) -> SearcherBuilder<M> {
-        Self {
-            matcher,
-            printer,
-            stats_enabled: false,
-        }
+        Self { matcher, printer }
     }
 
     pub(crate) fn build(self) -> Searcher<M> {
-        let mut searcher = Searcher::new(self.matcher, self.printer);
-        searcher.stats_enabled = self.stats_enabled;
-
-        searcher
-    }
-
-    pub(crate) fn stats(mut self, enabled: bool) -> Self {
-        self.stats_enabled = enabled;
-        self
+        Searcher::new(self.matcher, self.printer)
     }
 }
 
@@ -91,7 +78,6 @@ where
 {
     matcher: M,
     printer: ThreadedPrinterSender,
-    stats_enabled: bool,
 }
 
 impl<M> Searcher<M>
@@ -99,11 +85,7 @@ where
     M: Matcher + 'static,
 {
     fn new(matcher: M, printer: ThreadedPrinterSender) -> Self {
-        Self {
-            matcher,
-            printer,
-            stats_enabled: false,
-        }
+        Self { matcher, printer }
     }
 
     /// Given some `Target`s, search them using the given `Matcher`
