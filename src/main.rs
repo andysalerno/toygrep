@@ -122,9 +122,9 @@ fn print_help() {
         "Usage:
 {} [OPTION]... PATTERN [FILE]...
     Options:
-    -i      Case insensitive match.
-    -w      Match whole word.
-    -t      Print statistical information with output.",
+    -i, --case-insensitive      Case insensitive match.
+    -w, --whole-word            Match whole word.
+    -t, --stats                 Print statistical information with output.",
         exec_name
     );
 }
@@ -136,33 +136,35 @@ fn format_stats(read_stats: &ReadStats, time_log: &TimeLog) -> String {
 {} total bytes checked for non-utf8 detection
 {} matching lines found
 {} total bytes in matching lines
-{} seconds start-to-stop
-{} seconds searching
-{} seconds until first result arrives at printer 
-{} seconds between first result arriving and first printing
-{} seconds printing",
+{startstop} seconds start-to-stop
+{filesystem} seconds recursing through filesystem
+{search} seconds searching
+{printidle} seconds until first result arrives at printer 
+{printprint} seconds between first result arriving and first printing
+{printing} seconds printing",
         read_stats.total_files_visited,
         read_stats.skipped_files_non_utf8,
         read_stats.non_utf8_bytes_checked,
         read_stats.lines_matched_count,
         read_stats.lines_matched_bytes,
-        time_log
+        startstop = time_log
             .start_die_duration
             .map(|d| d.as_secs_f32().to_string())
             .unwrap_or_else(|| "(not measured)".into()),
-        time_log
+        filesystem = read_stats.filesystem_walk_dur.as_secs_f32(),
+        search = time_log
             .search_duration
             .map(|d| d.as_secs_f32().to_string())
             .unwrap_or_else(|| "(not measured)".into()),
-        time_log
+        printidle = time_log
             .printer_spawn_to_print
             .map(|d| d.as_secs_f32().to_string())
             .unwrap_or_else(|| "(not measured)".into()),
-        time_log
+        printprint = time_log
             .first_result_to_first_print
             .map(|d| d.as_secs_f32().to_string())
             .unwrap_or_else(|| "(not measured)".into()),
-        time_log
+        printing = time_log
             .print_duration
             .map(|d| d.as_secs_f32().to_string())
             .unwrap_or_else(|| "(not measured)".into()),

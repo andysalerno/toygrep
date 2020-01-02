@@ -19,6 +19,7 @@ const MAX_BUFF_START_LEN: usize = 1_000_000;
 const BINARY_CHECK_LEN_BYTES: usize = 512;
 
 pub(crate) mod stats {
+    use std::time::Duration;
 
     #[derive(Debug, Default)]
     pub(crate) struct ReadStats {
@@ -41,6 +42,9 @@ pub(crate) mod stats {
 
         /// Count of summed byte-length of lines that matched during reading.
         pub(crate) lines_matched_bytes: usize,
+
+        /// The duration of time spent recursing through the filesystem.
+        pub(crate) filesystem_walk_dur: Duration,
     }
 
     impl ReadStats {
@@ -50,6 +54,7 @@ pub(crate) mod stats {
             self.non_utf8_bytes_checked += other.non_utf8_bytes_checked;
             self.lines_matched_count += other.lines_matched_count;
             self.lines_matched_bytes += other.lines_matched_bytes;
+            self.filesystem_walk_dur += other.filesystem_walk_dur;
         }
     }
 }
@@ -244,11 +249,7 @@ where
             }
         }
 
-        printer.send(PrintMessage::Display(format!(
-            "All done spawning all search tasks ({} tasks; took {} ms).\n",
-            spawned_tasks.len(),
-            start.elapsed().as_millis()
-        )));
+        agg_stats.filesystem_walk_dur = start.elapsed();
 
         for task in spawned_tasks {
             let read_stats = task.await;
