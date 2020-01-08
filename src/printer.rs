@@ -189,15 +189,11 @@ pub(crate) mod threaded_printer {
                             write!(&mut stdout, "{}", msg).expect("Failed writing tou stdout.");
                         }
                         PrintMessage::Printable(printable) => {
-                            if self.file_to_matches.get(&printable.target_name).is_none() {
-                                self.file_to_matches
-                                    .insert(printable.target_name.clone(), Vec::new());
-                            }
-
                             let line_results = self
                                 .file_to_matches
-                                .get_mut(&printable.target_name)
-                                .unwrap();
+                                .entry(printable.target_name.to_owned())
+                                .or_default();
+
                             line_results.push(printable);
                         }
                         PrintMessage::EndOfReading { target_name } => {
