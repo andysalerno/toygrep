@@ -28,6 +28,7 @@ use crate::search::stats::ReadStats;
 use crate::search::SearcherBuilder;
 use crate::time_log::TimeLog;
 use matcher::RegexMatcherBuilder;
+use printer::blocking_printer::BlockingPrinterSender;
 use printer::threaded_printer::{ThreadedPrinterBuilder, ThreadedPrinterSender};
 use std::clone::Clone;
 use std::path::PathBuf;
@@ -71,10 +72,11 @@ async fn main() {
             .print_immediately(print_immediately)
             .build();
 
-        let printer_sender = ThreadedPrinterSender::new(sender);
-        let printer_handle = printer.spawn();
+        // let printer_sender = ThreadedPrinterSender::new(sender);
+        // let printer_handle = printer.spawn();
+        let printer_sender = BlockingPrinterSender;
 
-        (printer_handle, printer_sender)
+        (0, printer_sender)
     };
 
     // Perform the search, walking the filesystem, detecting matches,
@@ -92,13 +94,13 @@ async fn main() {
     // At this point, we've queued up all our searches, so now we must wait
     // for them to complete, send the results to the printer, and drop their
     // respective senders.
-    let print_time_log = printer_handle
-        .join()
-        .expect("Failed to join the printer thread.");
+    // let print_time_log = printer_handle
+    //     .join()
+    //     .expect("Failed to join the printer thread.");
 
-    time_log.print_duration = print_time_log.print_duration;
-    time_log.printer_spawn_to_print = print_time_log.printer_spawn_to_print;
-    time_log.first_result_to_first_print = print_time_log.first_result_to_first_print;
+    // time_log.print_duration = print_time_log.print_duration;
+    // time_log.printer_spawn_to_print = print_time_log.printer_spawn_to_print;
+    // time_log.first_result_to_first_print = print_time_log.first_result_to_first_print;
 
     if let Err(Error::TargetsNotFound(targets)) = &status {
         eprintln!("\nInvalid targets specified: {:?}", targets);

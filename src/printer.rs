@@ -46,13 +46,13 @@ pub(crate) enum PrintMessage {
     Display(String),
 }
 
-mod blocking_printer {
+pub(crate) mod blocking_printer {
     use super::*;
 
     /// A printer sender that "sends" by simply printint immediately
     /// (and blocking while doing so).
     #[derive(Debug, Clone)]
-    struct BlockingPrinterSender;
+    pub(crate) struct BlockingPrinterSender;
 
     impl PrinterSender for BlockingPrinterSender {
         fn send(&self, message: PrintMessage) {

@@ -2,6 +2,7 @@ use crate::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
 use crate::error::{Error, Result};
 use crate::matcher::Matcher;
 use crate::printer::threaded_printer::ThreadedPrinterSender;
+use crate::printer::blocking_printer::BlockingPrinterSender;
 use crate::printer::{PrintMessage, PrintableResult, PrinterSender};
 use crate::target::Target;
 use async_std::fs::{self, File};
@@ -17,6 +18,8 @@ const MAX_BUFF_START_LEN: usize = 1_000_000;
 
 // How many bytes must we check to be reasonably sure the input isn't binary?
 const BINARY_CHECK_LEN_BYTES: usize = 512;
+
+type Printer = BlockingPrinterSender;
 
 pub(crate) mod stats {
     use std::time::Duration;
@@ -67,14 +70,14 @@ pub(crate) mod stats {
 
 pub(crate) struct SearcherBuilder<M> {
     matcher: M,
-    printer: ThreadedPrinterSender,
+    printer: Printer,
 }
 
 impl<M> SearcherBuilder<M>
 where
     M: Matcher + 'static,
 {
-    pub(crate) fn new(matcher: M, printer: ThreadedPrinterSender) -> SearcherBuilder<M> {
+    pub(crate) fn new(matcher: M, printer: Printer) -> SearcherBuilder<M> {
         Self { matcher, printer }
     }
 
@@ -88,14 +91,14 @@ where
     M: Matcher + 'static,
 {
     matcher: M,
-    printer: ThreadedPrinterSender,
+    printer: Printer,
 }
 
 impl<M> Searcher<M>
 where
     M: Matcher + 'static,
 {
-    fn new(matcher: M, printer: ThreadedPrinterSender) -> Self {
+    fn new(matcher: M, printer: Printer) -> Self {
         Self { matcher, printer }
     }
 
@@ -147,7 +150,7 @@ where
         matcher: M,
         mut buffer: AsyncLineBufferReader<R>,
         name: Option<String>,
-        printer: ThreadedPrinterSender,
+        printer: Printer,
     ) -> stats::ReadStats
     where
         R: Read + std::marker::Unpin,
@@ -200,7 +203,7 @@ where
     async fn search_file(
         path: &Path,
         matcher: M,
-        printer: ThreadedPrinterSender,
+        printer: Printer,
     ) -> stats::ReadStats {
         let file = File::open(path).await.expect("failed opening file");
         let file_size_bytes = fs::metadata(path)
@@ -224,7 +227,7 @@ where
     async fn search_directory(
         directory_path: &Path,
         matcher: M,
-        printer: ThreadedPrinterSender,
+        printer: Printer,
     ) -> stats::ReadStats {
         let start = Instant::now();
 
