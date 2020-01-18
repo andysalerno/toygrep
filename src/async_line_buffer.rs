@@ -4,13 +4,13 @@ use async_std::prelude::*;
 use std::collections::VecDeque;
 
 #[derive(Debug, Clone)]
-pub(crate) struct LineResult<'a> {
+pub(crate) struct LineResult {
     line_num: usize,
-    text: &'a [u8],
+    text: Vec<u8>,
 }
 
-impl<'a> LineResult<'a> {
-    fn new(text: &'a [u8], line_num: usize) -> Self {
+impl LineResult {
+    fn new(text: Vec<u8>, line_num: usize) -> Self {
         Self { line_num, text }
     }
 
@@ -179,32 +179,24 @@ impl AsyncLineBuffer {
     /// Internally, the next line starts at `self.start`,
     /// and after calling this, `self.start` will be advanced
     /// by the length of the returned line.
-    fn consume_line(&mut self) -> Option<&[u8]> {
+    fn consume_line(&mut self) -> Option<Vec<u8>> {
         if let Some(line_break_pos) = self.line_break_idxs.pop_back() {
-            // inclusive range to include the linebreak itself.
-            let line = &self.buffer[self.start..=line_break_pos];
-            self.start += line.len();
-
-            Some(line)
+            // + 1 to include the line break itself
+            Some(self.drain_buf_until(line_break_pos + 1))
         } else {
             None
         }
     }
 
-    fn consume_remaining(&mut self) -> Option<&[u8]> {
-        if self.start >= self.end {
-            return None;
-        }
-
-        let remaining = Some(&self.buffer[self.start..self.end]);
-        self.start = self.end;
-
+    fn consume_remaining(&mut self) -> Vec<u8> {
+        let mut remaining = Vec::new();
+        std::mem::swap(&mut remaining, &mut self.buffer);
         remaining
     }
 
     /// Clear out the consumed portion of the buffer
     /// by rolling the unconsumed content back to the front.
-    fn roll_to_front(&mut self) {
+    fn _roll_to_front(&mut self) {
         if self.start == 0 {
             // Already at the start.
             return;
@@ -221,6 +213,32 @@ impl AsyncLineBuffer {
         });
 
         self.start = 0;
+    }
+
+    fn regain_precious_memory(&mut self) {
+        if self.start == 0 {
+            // Already at the start.
+            return;
+        }
+
+        self.buffer.copy_within(self.start..self.end, 0);
+
+        // TODO - must update all line_break_idx also...
+        let left_shift_len = self.start;
+        self.end -= left_shift_len;
+
+        self.line_break_idxs.iter_mut().for_each(|idx| {
+            *idx -= left_shift_len;
+        });
+
+        self.start = 0;
+    }
+
+    // Drain the buffer up to (but not including) the given position.
+    fn drain_buf_until(&mut self, pos: usize) -> Vec<u8> {
+        // TODO: more performant to split the vector here?
+        // Drain the line, including the newline at the end, and pop it off.
+        self.buffer.drain(..pos).collect::<Vec<_>>()
     }
 }
 
@@ -256,12 +274,12 @@ where
     /// `None` if there are no lines remaining to read.
     /// `Some(Ok(...))` if a line was read and parsed successfully.
     /// `Some(Err(...))` if a line was read but failed to parse.
-    pub(crate) async fn read_line<'a>(&'a mut self) -> Option<LineResult<'a>> {
+    pub(crate) async fn read_line(&mut self) -> Option<LineResult> {
         self.lines_read += 1;
         let line_num = self.lines_read;
 
         while self.line_buffer.line_break_idxs.is_empty() {
-            self.line_buffer.roll_to_front();
+            // self.line_buffer.roll_to_front();
             // There are currently no full lines in the buffer, so fill it up.
             let any_bytes_read = self.line_buffer.fill(&mut self.reader).await;
             if !any_bytes_read {
@@ -269,7 +287,7 @@ where
                 // we need to return it, since it will never get completed.
                 let line = self.line_buffer.consume_remaining();
 
-                return line.map(|l| LineResult::new(l, line_num));
+                return Some(LineResult::new(line, line_num));
             }
         }
 
