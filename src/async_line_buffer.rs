@@ -3,7 +3,7 @@
 use async_std::prelude::*;
 use std::collections::VecDeque;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LineResult {
     line_num: usize,
     text: Vec<u8>,
@@ -53,7 +53,6 @@ impl AsyncLineBufferBuilder {
             line_break_byte: self.line_break_byte,
             line_break_idxs: VecDeque::new(),
             min_read_size: self.min_read_size,
-            start: 0,
             end: 0,
         }
     }
@@ -90,17 +89,6 @@ pub(crate) struct AsyncLineBuffer {
     /// more space will be allocated to guarantee
     /// at least this much free space.
     min_read_size: usize,
-
-    /// The index of the first unconsumed byte
-    /// in the buffer.
-    /// E.x: say the buffer has the word "hello\n" populating
-    /// indexes 0-5.
-    /// `start` is currently 0, indicating nothing has been consumed yet.
-    /// We run "consume_line", which returns a slice starting at `start`
-    /// until the first newline (so, 0-5), and then updates `start` to begin
-    /// directly after this slice, such that a subsequent call will return
-    /// a slice of the next newline.
-    start: usize,
 
     /// The first position in the buffer outside
     /// of our written segment.
@@ -163,11 +151,6 @@ impl AsyncLineBuffer {
     /// to guarantee there is at least `min_read_size`
     /// available for writing to.
     fn ensure_capacity(&mut self) {
-        if self.start == self.end && self.end != 0 {
-            // this is an indication the buffer is closed and no longer active.
-            return;
-        }
-
         if self.end == self.buffer.len() {
             let grow_to = self.buffer.len() * 2;
             self.buffer.resize(grow_to, 0u8);
@@ -182,56 +165,25 @@ impl AsyncLineBuffer {
     fn consume_line(&mut self) -> Option<Vec<u8>> {
         if let Some(line_break_pos) = self.line_break_idxs.pop_back() {
             // + 1 to include the line break itself
+            let diff = line_break_pos + 1;
+            self.end -= diff;
+            self.line_break_idxs.iter_mut().for_each(|idx| *idx -= diff);
+
             Some(self.drain_buf_until(line_break_pos + 1))
         } else {
             None
         }
     }
 
-    fn consume_remaining(&mut self) -> Vec<u8> {
-        let mut remaining = Vec::new();
-        std::mem::swap(&mut remaining, &mut self.buffer);
-        remaining
-    }
-
-    /// Clear out the consumed portion of the buffer
-    /// by rolling the unconsumed content back to the front.
-    fn _roll_to_front(&mut self) {
-        if self.start == 0 {
-            // Already at the start.
-            return;
+    fn consume_remaining(&mut self) -> Option<Vec<u8>> {
+        match self.end {
+            0 => None,
+            _ => {
+                let end = self.end;
+                self.end = 0;
+                Some(self.drain_buf_until(end))
+            }
         }
-
-        self.buffer.copy_within(self.start..self.end, 0);
-
-        // TODO - must update all line_break_idx also...
-        let left_shift_len = self.start;
-        self.end -= left_shift_len;
-
-        self.line_break_idxs.iter_mut().for_each(|idx| {
-            *idx -= left_shift_len;
-        });
-
-        self.start = 0;
-    }
-
-    fn regain_precious_memory(&mut self) {
-        if self.start == 0 {
-            // Already at the start.
-            return;
-        }
-
-        self.buffer.copy_within(self.start..self.end, 0);
-
-        // TODO - must update all line_break_idx also...
-        let left_shift_len = self.start;
-        self.end -= left_shift_len;
-
-        self.line_break_idxs.iter_mut().for_each(|idx| {
-            *idx -= left_shift_len;
-        });
-
-        self.start = 0;
     }
 
     // Drain the buffer up to (but not including) the given position.
@@ -286,8 +238,7 @@ where
                 // Our reader had nothing left, so if we only have a partial line in the buffer,
                 // we need to return it, since it will never get completed.
                 let line = self.line_buffer.consume_remaining();
-
-                return Some(LineResult::new(line, line_num));
+                return line.map(|l| LineResult::new(l, line_num));
             }
         }
 
@@ -406,8 +357,8 @@ mod test {
 
             let line = reader.read_line().await;
 
-            assert!(
-                line.is_none(),
+            assert_eq!(
+                None, line,
                 "There were only two lines, and two lines were consumed already, \
                  so this should give None."
             );
@@ -426,8 +377,8 @@ mod test {
         async_std::task::block_on(async {
             let line = reader.read_line().await;
 
-            assert!(
-                line.is_none(),
+            assert_eq!(
+                None, line,
                 "The reader was totally empty, so the result should be None."
             );
         });
