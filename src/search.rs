@@ -164,9 +164,12 @@ where
 
         let name = name.unwrap_or_default();
         while let Some(line_result) = buffer.read_line().await {
+            let line_num = line_result.line_num();
+            let text = line_result.text();
+
             if binary_bytes_checked < BINARY_CHECK_LEN_BYTES {
-                if check_utf8(line_result.text()) {
-                    binary_bytes_checked += line_result.text().len();
+                if check_utf8(&text) {
+                    binary_bytes_checked += text.len();
                 } else {
                     stats.non_utf8_bytes_checked = binary_bytes_checked;
                     stats.skipped_files_non_utf8 = 1;
@@ -174,15 +177,11 @@ where
                 }
             }
 
-            if matcher.is_match(line_result.text()) {
+            if matcher.is_match(&text) {
                 stats.lines_matched_count += 1;
-                stats.lines_matched_bytes += line_result.text().len();
+                stats.lines_matched_bytes += text.len();
 
-                let printable = PrintableResult::new(
-                    name.clone(),
-                    line_result.line_num(),
-                    line_result.text().into(),
-                );
+                let printable = PrintableResult::new(name.clone(), line_num, text);
                 printer.send(PrintMessage::Printable(printable));
             }
         }
