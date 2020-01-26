@@ -2,6 +2,10 @@
 name = "toygrep"
 version = "0.1.0"
 authors = ["Andy <andysalerno@gmail.com>"]
+description = "A simple, async-std powered grep for education"
+repository = "https://github.com/andysalerno/toygrep"
+keywords = ["grep"]
+categories = ["command-line-utilities", "text-processing"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
