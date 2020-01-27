@@ -128,7 +128,6 @@ impl AsyncLineBuffer {
             let mut temp_idxs = VecDeque::new();
 
             // TODO: bit of a hack -- better way to appease borrow checker?
-            // Create in-mem vec or clone instead?
             std::mem::swap(&mut temp_idxs, &mut self.line_break_idxs);
 
             for (idx, _) in self.writable_buffer()[..bytes_count]
@@ -159,30 +158,27 @@ impl AsyncLineBuffer {
         &self.buffer[self.end..]
     }
 
-    /// Resize the internal buffer if necessary
-    /// to guarantee there is at least `min_read_size`
-    /// available for writing to.
+    /// Guarantee the writable portion of the buffer has nonzero length,
+    /// expanding the buffer if necessary.
     fn ensure_capacity(&mut self) {
-        if self.start == self.end && self.end != 0 {
-            // this is an indication the buffer is closed and no longer active.
+        if !self.writable_buffer().is_empty() {
             return;
         }
 
-        if self.end == self.buffer.len() {
-            let grow_to = self.buffer.len() * 2;
-            self.buffer.resize(grow_to, 0u8);
-        }
+        let cur_factor = usize::max(1, self.buffer.len());
+        let grow_to = cur_factor * 2;
+        self.buffer.resize(grow_to, 0u8);
     }
 
     /// Retrieve a slice containing the next line,
-    /// or None if there is no line.
-    /// Internally, the next line starts at `self.start`,
-    /// and after calling this, `self.start` will be advanced
-    /// by the length of the returned line.
+    /// or None if there is no line in the buffer currently.
     fn consume_line(&mut self) -> Option<&[u8]> {
         if let Some(line_break_pos) = self.line_break_idxs.pop_back() {
             // inclusive range to include the linebreak itself.
             let line = &self.buffer[self.start..=line_break_pos];
+
+            // Keep track of our new starting position by advancing `self.start`,
+            // which is how we internally represent that this slice has been consumed.
             self.start += line.len();
 
             Some(line)
@@ -196,23 +192,22 @@ impl AsyncLineBuffer {
             return None;
         }
 
-        let remaining = Some(&self.buffer[self.start..self.end]);
+        let remaining = &self.buffer[self.start..self.end];
         self.start = self.end;
 
-        remaining
+        Some(remaining)
     }
 
     /// Clear out the consumed portion of the buffer
     /// by rolling the unconsumed content back to the front.
     fn roll_to_front(&mut self) {
         if self.start == 0 {
-            // Already at the start.
+            // Start is already flush with the beginning of the buffer.
             return;
         }
 
         self.buffer.copy_within(self.start..self.end, 0);
 
-        // TODO - must update all line_break_idx also...
         let left_shift_len = self.start;
         self.end -= left_shift_len;
 
@@ -221,6 +216,10 @@ impl AsyncLineBuffer {
         });
 
         self.start = 0;
+    }
+
+    fn has_line(&self) -> bool {
+        !self.line_break_idxs.is_empty()
     }
 }
 
@@ -253,6 +252,10 @@ where
         self
     }
 
+    pub(crate) fn inner_buf_len(&self) -> usize {
+        self.line_buffer.buffer.len()
+    }
+
     /// `None` if there are no lines remaining to read.
     /// `Some(Ok(...))` if a line was read and parsed successfully.
     /// `Some(Err(...))` if a line was read but failed to parse.
@@ -260,7 +263,7 @@ where
         self.lines_read += 1;
         let line_num = self.lines_read;
 
-        while self.line_buffer.line_break_idxs.is_empty() {
+        while !self.line_buffer.has_line() {
             self.line_buffer.roll_to_front();
             // There are currently no full lines in the buffer, so fill it up.
             let any_bytes_read = self.line_buffer.fill(&mut self.reader).await;

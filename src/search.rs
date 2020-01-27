@@ -165,9 +165,8 @@ where
         let name = name.unwrap_or_default();
         while let Some(line_result) = buffer.read_line().await {
             if binary_bytes_checked < BINARY_CHECK_LEN_BYTES {
-                if check_utf8(line_result.text()) {
-                    binary_bytes_checked += line_result.text().len();
-                } else {
+                binary_bytes_checked += line_result.text().len();
+                if !check_utf8(line_result.text()) {
                     stats.non_utf8_bytes_checked = binary_bytes_checked;
                     stats.skipped_files_non_utf8 = 1;
                     return stats;
