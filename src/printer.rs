@@ -1,7 +1,10 @@
 use crate::error::{Error, Result};
+use crate::matcher::Matcher;
 use crate::time_log::TimeLog;
+use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
+use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
 /// A trait describing the ability to "send" a message to a printer.
 pub(crate) trait PrinterSender: Clone {
@@ -46,105 +49,87 @@ pub(crate) enum PrintMessage {
     Display(String),
 }
 
-mod blocking_printer {
-    use super::*;
+/// A builder for a printer sender, which may be either blocking
+/// or non-blocking (threaded).
+pub(crate) struct Printer<M: Matcher> {
+    config: PrettyPrinter::Config,
+    receiver: mpsc::Receiver<PrintMessage>,
+    matcher: Option<M>,
+}
 
-    /// A printer sender that "sends" by simply printing immediately
-    /// (and blocking while doing so).
-    #[derive(Debug, Clone)]
-    struct BlockingPrinterSender;
-
-    impl PrinterSender for BlockingPrinterSender {
-        fn send(&self, message: PrintMessage) {
-            println!("{:?}", message);
+impl<M: Matcher + 'static> Printer<M> {
+    pub(crate) fn new(receiver: mpsc::Receiver<PrintMessage>) -> Self {
+        Self {
+            config: PrettyPrinter::Config {
+                print_line_num: true,
+                group_by_target: true,
+                print_immediately: false,
+            },
+            receiver,
+            matcher: None,
         }
+    }
+
+    pub(crate) fn group_by_target(mut self, should_group: bool) -> Self {
+        self.config.group_by_target = should_group;
+        self
+    }
+
+    pub(crate) fn print_immediately(mut self, should_print_immediately: bool) -> Self {
+        self.config.print_immediately = should_print_immediately;
+        self
+    }
+
+    pub(crate) fn with_matcher(mut self, matcher: M) -> Self {
+        self.matcher = Some(matcher);
+        self
+    }
+
+    pub(crate) fn build_blocking(self) -> ThreadedPrinter<M> {
+        assert!(
+            !(self.config.print_immediately && self.config.group_by_target),
+            "The current configuration is not valid -- both 'print immediately' and \
+             'group by target' features are enabled, but when 'print immediately' \
+             is configured, 'I can't also group by target'."
+        );
+        ThreadedPrinter::new(self.matcher, self.receiver, self.config)
+    }
+
+    pub(crate) fn spawn_threaded(receiver: mpsc::Receiver<PrintMessage>) -> ThreadedPrinterSender {
+        todo!()
     }
 }
 
-pub(crate) mod threaded_printer {
+/// This module contains the types and logic
+/// for a printer that can group lines
+/// and color matching patterns.
+///
+/// It is not exposed outside this module,
+/// but module `threaded_printer` contains a
+/// threaded wrapper, and module `blocking_printer`
+/// contains a blocking wrapper that can be
+/// used externally.
+mod pretty_printer {
     use super::*;
     use crate::matcher::Matcher;
     use std::collections::HashMap;
     use std::io::Write;
-    use std::sync::mpsc;
     use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
-    #[derive(Clone)]
-    pub(crate) struct ThreadedPrinterSender {
-        sender: mpsc::Sender<PrintMessage>,
-    }
-
-    impl ThreadedPrinterSender {
-        pub(crate) fn new(sender: mpsc::Sender<PrintMessage>) -> Self {
-            Self { sender }
-        }
-    }
-
-    impl PrinterSender for ThreadedPrinterSender {
-        fn send(&self, message: PrintMessage) {
-            self.sender.send(message).expect("Failed sending message.");
-        }
-    }
-
-    struct ThreadedPrinterConfig {
+    pub(super) struct Config {
         print_line_num: bool,
         group_by_target: bool,
         print_immediately: bool,
     }
 
-    pub(crate) struct ThreadedPrinterBuilder<M: Matcher> {
-        config: ThreadedPrinterConfig,
-        receiver: mpsc::Receiver<PrintMessage>,
-        matcher: Option<M>,
-    }
-
-    impl<M: Matcher + 'static> ThreadedPrinterBuilder<M> {
-        pub(crate) fn new(receiver: mpsc::Receiver<PrintMessage>) -> Self {
-            Self {
-                config: ThreadedPrinterConfig {
-                    print_line_num: true,
-                    group_by_target: true,
-                    print_immediately: false,
-                },
-                receiver,
-                matcher: None,
-            }
-        }
-
-        pub(crate) fn group_by_target(mut self, should_group: bool) -> Self {
-            self.config.group_by_target = should_group;
-            self
-        }
-
-        pub(crate) fn print_immediately(mut self, should_print_immediately: bool) -> Self {
-            self.config.print_immediately = should_print_immediately;
-            self
-        }
-
-        pub(crate) fn with_matcher(mut self, matcher: M) -> Self {
-            self.matcher = Some(matcher);
-            self
-        }
-
-        pub(crate) fn build(self) -> ThreadedPrinter<M> {
-            assert!(
-                !(self.config.print_immediately && self.config.group_by_target),
-                "The current configuration is not valid -- both 'print immediately' and \
-                 'group by target' features are enabled, but when 'print immediately' \
-                 is configured, 'I can't also group by target'."
-            );
-            ThreadedPrinter::new(self.matcher, self.receiver, self.config)
-        }
-    }
-
-    struct PrettyPrinter<M: Matcher> {
+    pub(super) struct Printer<M: Matcher> {
         file_to_matches: HashMap<String, Vec<PrintableResult>>,
-        config: ThreadedPrinterConfig,
+        config: Config,
         matcher: Option<M>,
     }
 
-    impl<M: Matcher> PrettyPrinter<M> {
-        fn new(matcher: Option<M>, config: ThreadedPrinterConfig) -> Self {
+    impl<M: Matcher> Printer<M> {
+        pub(super) fn new(matcher: Option<M>, config: Config) -> Self {
             Self {
                 matcher,
                 config,
@@ -152,7 +137,7 @@ pub(crate) mod threaded_printer {
             }
         }
 
-        fn print<W>(&mut self, mut writer: W, message: PrintMessage)
+        pub(super) fn print<W>(&mut self, mut writer: W, message: PrintMessage)
         where
             W: Write + WriteColor,
         {
@@ -209,7 +194,7 @@ pub(crate) mod threaded_printer {
             };
 
             if let Some(matcher) = &self.matcher {
-                PrettyPrinter::print_colorized(&line_num, matcher, writer, &printable);
+                Printer::print_colorized(&line_num, matcher, writer, &printable);
             } else {
                 write!(writer, "{}{}", line_num, printable.text_as_string()?)
                     .expect("Error writing to stdout.");
@@ -281,30 +266,63 @@ pub(crate) mod threaded_printer {
             }
         }
     }
+}
 
-    /// A simple printer that can be spawned on a separate thread.
-    pub(crate) struct ThreadedPrinter<M: Matcher> {
-        receiver: mpsc::Receiver<PrintMessage>,
-        printer: PrettyPrinter<M>,
+pub(crate) mod blocking_printer {
+    use super::*;
+
+    struct Sender<M: Matcher> {
+        pretty_printer: pretty_printer::Printer<M>,
+    }
+}
+
+pub(crate) mod threaded_printer {
+    use super::*;
+    use crate::matcher::Matcher;
+    use std::sync::mpsc;
+    use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
+
+    #[derive(Clone)]
+    pub(crate) struct Sender {
+        sender: mpsc::Sender<PrintMessage>,
     }
 
-    impl<M: Matcher + 'static> ThreadedPrinter<M> {
+    impl Sender {
+        pub(crate) fn new(sender: mpsc::Sender<PrintMessage>) -> Self {
+            Self { sender }
+        }
+    }
+
+    impl PrinterSender for Sender {
+        fn send(&self, message: PrintMessage) {
+            self.sender.send(message).expect("Failed sending message.");
+        }
+    }
+
+    /// A simple printer that can be spawned on a separate thread,
+    /// and receive messages to print from the `Sender`.
+    pub(crate) struct Printer<M: Matcher> {
+        receiver: mpsc::Receiver<PrintMessage>,
+        printer: pretty_printer::Printer<M>,
+    }
+
+    impl<M: Matcher + 'static> Printer<M> {
         fn new(
             matcher: Option<M>,
             receiver: mpsc::Receiver<PrintMessage>,
-            config: ThreadedPrinterConfig,
+            config: pretty_printer::Config,
         ) -> Self {
             Self {
                 receiver,
-                printer: PrettyPrinter::new(matcher, config),
+                printer: pretty_printer::Printer::new(matcher, config),
             }
         }
 
-        pub(crate) fn spawn(mut self) -> thread::JoinHandle<TimeLog> {
+        pub(super) fn spawn(mut self) -> thread::JoinHandle<TimeLog> {
             thread::spawn(move || self.listen())
         }
 
-        pub(crate) fn listen(&mut self) -> TimeLog {
+        pub(super) fn listen(&mut self) -> TimeLog {
             let stdout = StandardStream::stdout(ColorChoice::Auto);
             let mut stdout = stdout.lock();
 
