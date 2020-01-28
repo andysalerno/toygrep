@@ -49,7 +49,7 @@ pub(crate) enum PrintMessage {
 mod blocking_printer {
     use super::*;
 
-    /// A printer sender that "sends" by simply printint immediately
+    /// A printer sender that "sends" by simply printing immediately
     /// (and blocking while doing so).
     #[derive(Debug, Clone)]
     struct BlockingPrinterSender;
@@ -137,94 +137,45 @@ pub(crate) mod threaded_printer {
         }
     }
 
-    /// A simple printer that can be spawned on a separate thread.
-    pub(crate) struct ThreadedPrinter<M: Matcher> {
-        config: ThreadedPrinterConfig,
-        receiver: mpsc::Receiver<PrintMessage>,
+    struct PrettyPrinter<M: Matcher> {
         file_to_matches: HashMap<String, Vec<PrintableResult>>,
+        config: ThreadedPrinterConfig,
         matcher: Option<M>,
     }
 
-    impl<M: Matcher + 'static> ThreadedPrinter<M> {
-        fn new(
-            matcher: Option<M>,
-            receiver: mpsc::Receiver<PrintMessage>,
-            config: ThreadedPrinterConfig,
-        ) -> Self {
+    impl<M: Matcher> PrettyPrinter<M> {
+        fn new(matcher: Option<M>, config: ThreadedPrinterConfig) -> Self {
             Self {
-                receiver,
+                matcher,
                 config,
                 file_to_matches: HashMap::new(),
-                matcher,
             }
         }
 
-        pub(crate) fn spawn(mut self) -> thread::JoinHandle<TimeLog> {
-            thread::spawn(move || self.listen())
-        }
-
-        pub(crate) fn listen(&mut self) -> TimeLog {
-            let stdout = StandardStream::stdout(ColorChoice::Auto);
-            let mut stdout = stdout.lock();
-
-            let mut errors = Vec::new();
-
-            // At first, the instant represents 'spawn-to-first-print'.
-            let spawn_to_print_instant = Instant::now();
-            // Bit of a hack -- not using `instant` the intended way here.
-            let mut time_log = TimeLog::new(spawn_to_print_instant);
-
-            let mut first_print_instant = None;
-            let mut first_result_to_first_print = None;
-            while let Ok(message) = self.receiver.recv() {
-                if time_log.printer_spawn_to_print.is_none() {
-                    time_log.printer_spawn_to_print = Some(spawn_to_print_instant.elapsed());
-                    // Restart instant for logging first-print-to-last.
-                    first_print_instant = Some(Instant::now());
-                }
-
-                if self.config.group_by_target {
-                    match message {
-                        PrintMessage::Display(msg) => {
-                            write!(&mut stdout, "{}", msg).expect("Failed writing tou stdout.");
-                        }
-                        PrintMessage::Printable(printable) => {
-                            let line_results = self
-                                .file_to_matches
-                                .entry(printable.target_name.to_owned())
-                                .or_default();
-
-                            line_results.push(printable);
-                        }
-                        PrintMessage::EndOfReading { target_name } => {
-                            if first_result_to_first_print.is_none() {
-                                first_result_to_first_print =
-                                    Some(first_print_instant.unwrap().elapsed());
-                            }
-
-                            let _ = self
-                                .print_target_results(&mut stdout, &target_name)
-                                .map_err(|e| errors.push(e));
-                        }
+        fn print<W>(&mut self, mut writer: W, message: PrintMessage)
+        where
+            W: Write + WriteColor,
+        {
+            if self.config.group_by_target {
+                match message {
+                    PrintMessage::Display(msg) => {
+                        print!("{}", msg);
                     }
-                } else if let PrintMessage::Printable(printable) = message {
-                    let _ = self
-                        .print_line_result(&mut stdout, printable)
-                        .map_err(|e| errors.push(e));
+                    PrintMessage::Printable(printable) => {
+                        let line_results = self
+                            .file_to_matches
+                            .entry(printable.target_name.to_owned())
+                            .or_default();
+
+                        line_results.push(printable);
+                    }
+                    PrintMessage::EndOfReading { target_name } => {
+                        let _ = self.print_target_results(&mut writer, &target_name);
+                    }
                 }
+            } else if let PrintMessage::Printable(printable) = message {
+                let _ = self.print_line_result(&mut writer, printable);
             }
-
-            time_log.print_duration = first_print_instant.map(|i| i.elapsed());
-            time_log.first_result_to_first_print = first_result_to_first_print;
-
-            errors.into_iter().for_each(|e| match e {
-                Error::Utf8PrintFail(target) => {
-                    eprintln!("Invalid Utf8 encountered while parsing: {}", target)
-                }
-                _ => eprintln!("Printer encountered an unknown error: {:?}", e),
-            });
-
-            time_log
         }
 
         fn print_target_results<W>(&mut self, writer: &mut W, name: &str) -> Result<()>
@@ -258,7 +209,7 @@ pub(crate) mod threaded_printer {
             };
 
             if let Some(matcher) = &self.matcher {
-                ThreadedPrinter::print_colorized(&line_num, matcher, writer, &printable);
+                PrettyPrinter::print_colorized(&line_num, matcher, writer, &printable);
             } else {
                 write!(writer, "{}{}", line_num, printable.text_as_string()?)
                     .expect("Error writing to stdout.");
@@ -328,6 +279,45 @@ pub(crate) mod threaded_printer {
             } else {
                 eprintln!("Utf8 parsing error for target: {}", printable.target_name);
             }
+        }
+    }
+
+    /// A simple printer that can be spawned on a separate thread.
+    pub(crate) struct ThreadedPrinter<M: Matcher> {
+        receiver: mpsc::Receiver<PrintMessage>,
+        printer: PrettyPrinter<M>,
+    }
+
+    impl<M: Matcher + 'static> ThreadedPrinter<M> {
+        fn new(
+            matcher: Option<M>,
+            receiver: mpsc::Receiver<PrintMessage>,
+            config: ThreadedPrinterConfig,
+        ) -> Self {
+            Self {
+                receiver,
+                printer: PrettyPrinter::new(matcher, config),
+            }
+        }
+
+        pub(crate) fn spawn(mut self) -> thread::JoinHandle<TimeLog> {
+            thread::spawn(move || self.listen())
+        }
+
+        pub(crate) fn listen(&mut self) -> TimeLog {
+            let stdout = StandardStream::stdout(ColorChoice::Auto);
+            let mut stdout = stdout.lock();
+
+            // At first, the instant represents 'spawn-to-first-print'.
+            let spawn_to_print_instant = Instant::now();
+            // Bit of a hack -- not using `instant` the intended way here.
+            let mut time_log = TimeLog::new(spawn_to_print_instant);
+
+            while let Ok(message) = self.receiver.recv() {
+                self.printer.print(&mut stdout, message);
+            }
+
+            time_log
         }
     }
 }
