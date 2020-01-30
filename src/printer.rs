@@ -3,9 +3,10 @@ use crate::matcher::Matcher;
 use crate::time_log::TimeLog;
 use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread;
 use std::time::Instant;
-use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
+use termcolor::{ColorChoice, StandardStream};
 
 #[derive(Clone)]
 pub(crate) struct Dummy;
@@ -69,12 +70,12 @@ pub(super) struct Config {
 
 /// A builder for a printer sender, which may be either blocking
 /// or non-blocking (threaded).
-pub(crate) struct Printer<M: Matcher> {
+pub(crate) struct Printer<M: Matcher + Send + Sync> {
     config: Config,
     matcher: Option<M>,
 }
 
-impl<M: Matcher + 'static> Printer<M> {
+impl<M: Matcher + Send + Sync + 'static> Printer<M> {
     pub(crate) fn new() -> Self {
         Self {
             config: Config {
@@ -102,13 +103,16 @@ impl<M: Matcher + 'static> Printer<M> {
     }
 
     pub(crate) fn build_blocking(self) -> impl PrinterSender {
-        todo!()
+        blocking_printer::BlockingSender::new(pretty_printer::Printer::new(
+            self.matcher,
+            self.config,
+        ))
     }
 
     pub(crate) fn spawn_threaded(self) -> (impl PrinterSender, std::thread::JoinHandle<TimeLog>) {
         let (sender, receiver) = mpsc::channel();
         let sender = threaded_printer::Sender::new(sender);
-        let printer = threaded_printer::Printer::new(self.matcher, receiver, self.config);
+        let mut printer = threaded_printer::Printer::new(self.matcher, receiver, self.config);
 
         (sender, thread::spawn(move || printer.listen()))
     }
@@ -128,7 +132,7 @@ mod pretty_printer {
     use crate::matcher::Matcher;
     use std::collections::HashMap;
     use std::io::Write;
-    use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
+    use termcolor::{Color, ColorSpec, WriteColor};
 
     pub(super) struct Printer<M: Matcher> {
         file_to_matches: HashMap<String, Vec<PrintableResult>>,
@@ -281,22 +285,29 @@ pub(crate) mod blocking_printer {
     use pretty_printer::Printer;
 
     #[derive(Clone)]
-    struct BlockingSender<M: Matcher>(std::sync::Arc<Printer<M>>);
+    pub(super) struct BlockingSender<M: Matcher + Send + Sync>(Arc<Mutex<Printer<M>>>);
 
-    impl<M: Matcher> BlockingSender<M> {
+    impl<M: Matcher + Send + Sync> BlockingSender<M> {
         pub(super) fn new(printer: Printer<M>) -> Self {
-            todo!()
+            BlockingSender(Arc::new(Mutex::new(printer)))
         }
     }
 
-    impl<M: Matcher> super::PrinterSender for BlockingSender<M> {}
+    impl<M: Matcher + Send + Sync> super::PrinterSender for BlockingSender<M> {
+        fn send(&self, message: PrintMessage) {
+            // TODO: store stdout in struct
+            let mut stdout = StandardStream::stdout(ColorChoice::Auto);
+            let mut lock = self.0.lock().expect("Unable to acquire lock.");
+            lock.print(&mut stdout, message);
+        }
+    }
 }
 
 pub(crate) mod threaded_printer {
     use super::*;
     use crate::matcher::Matcher;
     use std::sync::mpsc;
-    use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
+    use termcolor::{ColorChoice, StandardStream};
 
     #[derive(Clone)]
     pub(crate) struct Sender {

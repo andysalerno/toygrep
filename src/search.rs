@@ -64,37 +64,44 @@ pub(crate) mod stats {
     }
 }
 
-pub(crate) struct SearcherBuilder<M> {
+pub(crate) struct SearcherBuilder<M, P>
+where
+    M: Matcher,
+    P: PrinterSender,
+{
     matcher: M,
-    printer: ThreadedPrinterSender,
+    printer: P,
 }
 
-impl<M> SearcherBuilder<M>
+impl<M, P> SearcherBuilder<M, P>
 where
     M: Matcher + 'static,
+    P: PrinterSender + 'static,
 {
-    pub(crate) fn new(matcher: M, printer: ThreadedPrinterSender) -> SearcherBuilder<M> {
+    pub(crate) fn new(matcher: M, printer: P) -> SearcherBuilder<M, P> {
         Self { matcher, printer }
     }
 
-    pub(crate) fn build(self) -> Searcher<M> {
+    pub(crate) fn build(self) -> Searcher<M, P> {
         Searcher::new(self.matcher, self.printer)
     }
 }
 
-pub(crate) struct Searcher<M>
+pub(crate) struct Searcher<M, P>
 where
     M: Matcher + 'static,
+    P: PrinterSender,
 {
     matcher: M,
-    printer: ThreadedPrinterSender,
+    printer: P,
 }
 
-impl<M> Searcher<M>
+impl<M, P> Searcher<M, P>
 where
     M: Matcher + 'static,
+    P: PrinterSender + 'static,
 {
-    fn new(matcher: M, printer: ThreadedPrinterSender) -> Self {
+    fn new(matcher: M, printer: P) -> Self {
         Self { matcher, printer }
     }
 
@@ -146,7 +153,7 @@ where
         matcher: M,
         mut buffer: AsyncLineBufferReader<R>,
         name: Option<String>,
-        printer: ThreadedPrinterSender,
+        printer: P,
     ) -> stats::ReadStats
     where
         R: Read + std::marker::Unpin,
@@ -195,11 +202,7 @@ where
         stats
     }
 
-    async fn search_file(
-        path: &Path,
-        matcher: M,
-        printer: ThreadedPrinterSender,
-    ) -> stats::ReadStats {
+    async fn search_file(path: &Path, matcher: M, printer: P) -> stats::ReadStats {
         let file = {
             let f = File::open(path).await;
 
@@ -228,11 +231,7 @@ where
         Searcher::search_via_reader(matcher, line_buf_rdr, target_name, printer).await
     }
 
-    async fn search_directory(
-        directory_path: &Path,
-        matcher: M,
-        printer: ThreadedPrinterSender,
-    ) -> stats::ReadStats {
+    async fn search_directory(directory_path: &Path, matcher: M, printer: P) -> stats::ReadStats {
         let start = Instant::now();
 
         let mut agg_stats = stats::ReadStats::default();
