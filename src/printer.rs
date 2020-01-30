@@ -2,12 +2,24 @@ use crate::error::{Error, Result};
 use crate::matcher::Matcher;
 use crate::time_log::TimeLog;
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
+#[derive(Clone)]
+pub(crate) struct Dummy;
+
+impl PrinterSender for Dummy {
+    fn send(&self, message: PrintMessage) {}
+}
+
+pub(crate) fn make_printer_sender() -> impl PrinterSender {
+    Dummy
+}
+
 /// A trait describing the ability to "send" a message to a printer.
-pub(crate) trait PrinterSender: Clone {
+pub(crate) trait PrinterSender: Clone + Send {
     fn send(&self, message: PrintMessage);
 }
 
@@ -49,23 +61,27 @@ pub(crate) enum PrintMessage {
     Display(String),
 }
 
+pub(super) struct Config {
+    print_line_num: bool,
+    group_by_target: bool,
+    print_immediately: bool,
+}
+
 /// A builder for a printer sender, which may be either blocking
 /// or non-blocking (threaded).
 pub(crate) struct Printer<M: Matcher> {
-    config: PrettyPrinter::Config,
-    receiver: mpsc::Receiver<PrintMessage>,
+    config: Config,
     matcher: Option<M>,
 }
 
 impl<M: Matcher + 'static> Printer<M> {
-    pub(crate) fn new(receiver: mpsc::Receiver<PrintMessage>) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            config: PrettyPrinter::Config {
+            config: Config {
                 print_line_num: true,
                 group_by_target: true,
                 print_immediately: false,
             },
-            receiver,
             matcher: None,
         }
     }
@@ -85,18 +101,16 @@ impl<M: Matcher + 'static> Printer<M> {
         self
     }
 
-    pub(crate) fn build_blocking(self) -> ThreadedPrinter<M> {
-        assert!(
-            !(self.config.print_immediately && self.config.group_by_target),
-            "The current configuration is not valid -- both 'print immediately' and \
-             'group by target' features are enabled, but when 'print immediately' \
-             is configured, 'I can't also group by target'."
-        );
-        ThreadedPrinter::new(self.matcher, self.receiver, self.config)
+    pub(crate) fn build_blocking(self) -> impl PrinterSender {
+        todo!()
     }
 
-    pub(crate) fn spawn_threaded(receiver: mpsc::Receiver<PrintMessage>) -> ThreadedPrinterSender {
-        todo!()
+    pub(crate) fn spawn_threaded(self) -> (impl PrinterSender, std::thread::JoinHandle<TimeLog>) {
+        let (sender, receiver) = mpsc::channel();
+        let sender = threaded_printer::Sender::new(sender);
+        let printer = threaded_printer::Printer::new(self.matcher, receiver, self.config);
+
+        (sender, thread::spawn(move || printer.listen()))
     }
 }
 
@@ -115,12 +129,6 @@ mod pretty_printer {
     use std::collections::HashMap;
     use std::io::Write;
     use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
-
-    pub(super) struct Config {
-        print_line_num: bool,
-        group_by_target: bool,
-        print_immediately: bool,
-    }
 
     pub(super) struct Printer<M: Matcher> {
         file_to_matches: HashMap<String, Vec<PrintableResult>>,
@@ -270,10 +278,18 @@ mod pretty_printer {
 
 pub(crate) mod blocking_printer {
     use super::*;
+    use pretty_printer::Printer;
 
-    struct Sender<M: Matcher> {
-        pretty_printer: pretty_printer::Printer<M>,
+    #[derive(Clone)]
+    struct BlockingSender<M: Matcher>(std::sync::Arc<Printer<M>>);
+
+    impl<M: Matcher> BlockingSender<M> {
+        pub(super) fn new(printer: Printer<M>) -> Self {
+            todo!()
+        }
     }
+
+    impl<M: Matcher> super::PrinterSender for BlockingSender<M> {}
 }
 
 pub(crate) mod threaded_printer {
@@ -307,10 +323,10 @@ pub(crate) mod threaded_printer {
     }
 
     impl<M: Matcher + 'static> Printer<M> {
-        fn new(
+        pub(super) fn new(
             matcher: Option<M>,
             receiver: mpsc::Receiver<PrintMessage>,
-            config: pretty_printer::Config,
+            config: Config,
         ) -> Self {
             Self {
                 receiver,

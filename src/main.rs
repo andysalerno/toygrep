@@ -28,7 +28,6 @@ use crate::search::stats::ReadStats;
 use crate::search::SearcherBuilder;
 use crate::time_log::TimeLog;
 use matcher::RegexMatcherBuilder;
-use printer::threaded_printer::{ThreadedPrinterBuilder, ThreadedPrinterSender};
 use std::clone::Clone;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -54,27 +53,28 @@ async fn main() {
     // The printer is spawned on a separate thread, giving us a channel
     // sender that can be cloned across async searches to send it results.
     // (Note: separate THREAD, -not- an async task.)
-    let (printer_handle, printer_sender) = {
-        let (sender, receiver) = mpsc::channel();
+    let printer_sender = {
+        // let (sender, receiver) = mpsc::channel();
 
-        let first_target = user_input.targets.first();
+        // let first_target = user_input.targets.first();
 
-        let print_immediately =
-            user_input.targets.len() == 1 && first_target.unwrap().is_file().await;
+        // let print_immediately =
+        //     user_input.targets.len() == 1 && first_target.unwrap().is_file().await;
 
-        let group_by_target = user_input.targets.len() > 1
-            || (first_target.is_some() && first_target.unwrap().is_dir().await);
+        // let group_by_target = user_input.targets.len() > 1
+        //     || (first_target.is_some() && first_target.unwrap().is_dir().await);
 
-        let printer = ThreadedPrinterBuilder::new(receiver)
-            .with_matcher(matcher.clone())
-            .group_by_target(group_by_target)
-            .print_immediately(print_immediately)
-            .build();
+        // let printer = ThreadedPrinterBuilder::new(receiver)
+        //     .with_matcher(matcher.clone())
+        //     .group_by_target(group_by_target)
+        //     .print_immediately(print_immediately)
+        //     .build();
 
-        let printer_sender = ThreadedPrinterSender::new(sender);
-        let printer_handle = printer.spawn();
+        // let printer_sender = ThreadedPrinterSender::new(sender);
+        // let printer_handle = printer.spawn();
 
-        (printer_handle, printer_sender)
+        // printer_sender
+        printer::make_printer_sender()
     };
 
     // Perform the search, walking the filesystem, detecting matches,
@@ -86,29 +86,29 @@ async fn main() {
         searcher.search(&user_input.targets).await
     };
 
-    time_log.log_search_duration();
+    // time_log.log_search_duration();
 
     // The printer thread stays alive as long as any channel senders exist.
     // At this point, we've queued up all our searches, so now we must wait
     // for them to complete, send the results to the printer, and drop their
     // respective senders.
-    let print_time_log = printer_handle
-        .join()
-        .expect("Failed to join the printer thread.");
+    // let print_time_log = printer_handle
+    //     .join()
+    //     .expect("Failed to join the printer thread.");
 
-    time_log.print_duration = print_time_log.print_duration;
-    time_log.printer_spawn_to_print = print_time_log.printer_spawn_to_print;
-    time_log.first_result_to_first_print = print_time_log.first_result_to_first_print;
+    // time_log.print_duration = print_time_log.print_duration;
+    // time_log.printer_spawn_to_print = print_time_log.printer_spawn_to_print;
+    // time_log.first_result_to_first_print = print_time_log.first_result_to_first_print;
 
-    if let Err(Error::TargetsNotFound(targets)) = &status {
-        eprintln!("\nInvalid targets specified: {:?}", targets);
-    }
+    // if let Err(Error::TargetsNotFound(targets)) = &status {
+    //     eprintln!("\nInvalid targets specified: {:?}", targets);
+    // }
 
-    time_log.log_start_die_duration();
-    if user_input.stats && status.is_ok() {
-        let stats = status.unwrap();
-        println!("{}", format_stats(&stats, &time_log));
-    }
+    // time_log.log_start_die_duration();
+    // if user_input.stats && status.is_ok() {
+    //     let stats = status.unwrap();
+    //     println!("{}", format_stats(&stats, &time_log));
+    // }
 }
 
 fn print_help() {

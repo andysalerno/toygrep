@@ -1,7 +1,6 @@
 use crate::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
 use crate::error::{Error, Result};
 use crate::matcher::Matcher;
-use crate::printer::threaded_printer::ThreadedPrinterSender;
 use crate::printer::{PrintMessage, PrintableResult, PrinterSender};
 use crate::target::Target;
 use async_std::fs::{self, File};
