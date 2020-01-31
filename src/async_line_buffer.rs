@@ -25,14 +25,14 @@ impl<'a> LineResult<'a> {
 
 pub(crate) struct AsyncLineBufferBuilder {
     line_break_byte: u8,
-    min_read_size: usize,
+    start_size_bytes: usize,
 }
 
 impl AsyncLineBufferBuilder {
     pub(crate) fn new() -> Self {
         Self {
             line_break_byte: b'\n',
-            min_read_size: 16_000,
+            start_size_bytes: 16_000,
         }
     }
 
@@ -41,18 +41,17 @@ impl AsyncLineBufferBuilder {
         self
     }
 
-    pub(crate) fn with_minimum_read_size(mut self, min_read_size: usize) -> Self {
-        self.min_read_size = min_read_size;
+    pub(crate) fn with_start_size_bytes(mut self, start_size_bytes: usize) -> Self {
+        self.start_size_bytes = start_size_bytes;
         self
     }
 
     pub(crate) fn build(self) -> AsyncLineBuffer {
         AsyncLineBuffer {
             // TODO: experiment with "reserved space" instead of pre-allocating
-            buffer: vec![0u8; self.min_read_size],
+            buffer: vec![0u8; self.start_size_bytes],
             line_break_byte: self.line_break_byte,
             line_break_idxs: VecDeque::new(),
-            min_read_size: self.min_read_size,
             start: 0,
             end: 0,
         }
@@ -84,12 +83,6 @@ pub(crate) struct AsyncLineBuffer {
     /// where line breaks are known to exist.
     /// Will always be in increasing order.
     line_break_idxs: VecDeque<usize>,
-
-    /// If we attempt to fill this buffer,
-    /// and there is not at least this much free space,
-    /// more space will be allocated to guarantee
-    /// at least this much free space.
-    min_read_size: usize,
 
     /// The index of the first unconsumed byte
     /// in the buffer.
@@ -295,7 +288,7 @@ mod test {
         let bytes_reader = BufReader::new("This is a simple test.".as_bytes());
 
         let line_buf = AsyncLineBufferBuilder::new()
-            .with_minimum_read_size(128)
+            .with_start_size_bytes(128)
             .build();
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
@@ -310,7 +303,7 @@ mod test {
             BufReader::new("This is a simple test.\nAnd now it has two lines.".as_bytes());
 
         let line_buf = AsyncLineBufferBuilder::new()
-            .with_minimum_read_size(128)
+            .with_start_size_bytes(128)
             .build();
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
@@ -326,7 +319,7 @@ mod test {
         let bytes_reader = BufReader::new("This is a simple test.".as_bytes());
 
         let line_buf = AsyncLineBufferBuilder::new()
-            .with_minimum_read_size(1)
+            .with_start_size_bytes(1)
             .build();
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
@@ -340,7 +333,7 @@ mod test {
             BufReader::new("This is a simple test.\nAnd now it has two lines.".as_bytes());
 
         let line_buf = AsyncLineBufferBuilder::new()
-            .with_minimum_read_size(1)
+            .with_start_size_bytes(1)
             .build();
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
@@ -357,7 +350,7 @@ mod test {
             BufReader::new("This is a simple test.\nAnd now it has two lines.".as_bytes());
 
         let line_buf = AsyncLineBufferBuilder::new()
-            .with_minimum_read_size(1)
+            .with_start_size_bytes(1)
             .build();
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
@@ -381,7 +374,7 @@ mod test {
             BufReader::new("This is a simple test.\nAnd now it has two lines.".as_bytes());
 
         let line_buf = AsyncLineBufferBuilder::new()
-            .with_minimum_read_size(1024)
+            .with_start_size_bytes(1024)
             .build();
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
@@ -404,7 +397,7 @@ mod test {
         let bytes_reader = BufReader::new("".as_bytes());
 
         let line_buf = AsyncLineBufferBuilder::new()
-            .with_minimum_read_size(128)
+            .with_start_size_bytes(128)
             .build();
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
@@ -423,7 +416,7 @@ mod test {
         let bytes_reader = BufReader::new("\n".as_bytes());
 
         let line_buf = AsyncLineBufferBuilder::new()
-            .with_minimum_read_size(128)
+            .with_start_size_bytes(128)
             .build();
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
@@ -439,7 +432,7 @@ mod test {
         let bytes_reader = BufReader::new("\n\n\n\n".as_bytes());
 
         let line_buf = AsyncLineBufferBuilder::new()
-            .with_minimum_read_size(128)
+            .with_start_size_bytes(128)
             .build();
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
@@ -466,7 +459,7 @@ mod test {
         let bytes_reader = BufReader::new("H".as_bytes());
 
         let line_buf = AsyncLineBufferBuilder::new()
-            .with_minimum_read_size(128)
+            .with_start_size_bytes(128)
             .build();
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 
@@ -493,7 +486,7 @@ to have had so much blood in him.
         let bytes_reader = BufReader::new(macbeth.as_bytes());
 
         let line_buf = AsyncLineBufferBuilder::new()
-            .with_minimum_read_size(64)
+            .with_start_size_bytes(64)
             .build();
         let mut reader = AsyncLineBufferReader::new(bytes_reader, line_buf);
 

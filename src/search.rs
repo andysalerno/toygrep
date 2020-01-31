@@ -219,10 +219,10 @@ where
             .len();
         let rdr = BufReader::new(file);
 
-        let min_read_size = usize::min(file_size_bytes as usize + 512, MAX_BUFF_START_LEN);
+        let min_read_size = usize::min(file_size_bytes as usize + 64, MAX_BUFF_START_LEN);
 
         let line_buf = AsyncLineBufferBuilder::new()
-            .with_minimum_read_size(min_read_size)
+            .with_start_size_bytes(min_read_size)
             .build();
         let line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf).line_nums(true);
 

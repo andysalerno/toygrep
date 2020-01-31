@@ -70,6 +70,7 @@ async fn main() {
     // terminated, the printer thread is likely still processing
     // the results sent to it).
     let status = {
+        // TODO: consider using dyn instead of branching
         if user_input.synchronous_printer {
             let printer = print_builder.build_blocking();
             let searcher = SearcherBuilder::new(matcher, printer).build();
