@@ -7,6 +7,7 @@ pub(crate) struct UserInput {
 
     pub(crate) whole_word: bool,
     pub(crate) case_insensitive: bool,
+    pub(crate) synchronous_printer: bool,
 
     pub(crate) targets: Vec<Target>,
 
@@ -28,6 +29,7 @@ pub(crate) fn capture_input(args: impl Iterator<Item = String>) -> UserInput {
             "-i" | "--case-insensitive" => user_input.case_insensitive = true,
             "-w" | "--whole-word" => user_input.whole_word = true,
             "-t" | "--stats" => user_input.stats = true,
+            "-p" | "--sync-print" => user_input.synchronous_printer = true,
             _ => {
                 panic!("Unknown flag: {}", arg);
             }

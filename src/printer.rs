@@ -8,17 +8,6 @@ use std::thread;
 use std::time::Instant;
 use termcolor::{ColorChoice, StandardStream};
 
-#[derive(Clone)]
-pub(crate) struct Dummy;
-
-impl PrinterSender for Dummy {
-    fn send(&self, message: PrintMessage) {}
-}
-
-pub(crate) fn make_printer_sender() -> impl PrinterSender {
-    Dummy
-}
-
 /// A trait describing the ability to "send" a message to a printer.
 pub(crate) trait PrinterSender: Clone + Send {
     fn send(&self, message: PrintMessage);
@@ -343,10 +332,6 @@ pub(crate) mod threaded_printer {
                 receiver,
                 printer: pretty_printer::Printer::new(matcher, config),
             }
-        }
-
-        pub(super) fn spawn(mut self) -> thread::JoinHandle<TimeLog> {
-            thread::spawn(move || self.listen())
         }
 
         pub(super) fn listen(&mut self) -> TimeLog {

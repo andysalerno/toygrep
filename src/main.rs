@@ -24,13 +24,13 @@ mod target;
 mod time_log;
 
 use crate::error::Error;
+use crate::printer::Printer;
 use crate::search::stats::ReadStats;
 use crate::search::SearcherBuilder;
 use crate::time_log::TimeLog;
 use matcher::RegexMatcherBuilder;
 use std::clone::Clone;
 use std::path::PathBuf;
-use std::sync::mpsc;
 use std::time::Instant;
 
 #[async_std::main]
@@ -50,31 +50,19 @@ async fn main() {
         .match_whole_word(user_input.whole_word)
         .build();
 
-    // The printer is spawned on a separate thread, giving us a channel
-    // sender that can be cloned across async searches to send it results.
-    // (Note: separate THREAD, -not- an async task.)
-    let printer_sender = {
-        // let (sender, receiver) = mpsc::channel();
+    let print_builder = {
+        let first_target = user_input.targets.first();
 
-        // let first_target = user_input.targets.first();
+        let print_immediately =
+            user_input.targets.len() == 1 && first_target.unwrap().is_file().await;
 
-        // let print_immediately =
-        //     user_input.targets.len() == 1 && first_target.unwrap().is_file().await;
+        let group_by_target = user_input.targets.len() > 1
+            || (first_target.is_some() && first_target.unwrap().is_dir().await);
 
-        // let group_by_target = user_input.targets.len() > 1
-        //     || (first_target.is_some() && first_target.unwrap().is_dir().await);
-
-        // let printer = ThreadedPrinterBuilder::new(receiver)
-        //     .with_matcher(matcher.clone())
-        //     .group_by_target(group_by_target)
-        //     .print_immediately(print_immediately)
-        //     .build();
-
-        // let printer_sender = ThreadedPrinterSender::new(sender);
-        // let printer_handle = printer.spawn();
-
-        // printer_sender
-        printer::make_printer_sender()
+        Printer::new()
+            .with_matcher(matcher.clone())
+            .group_by_target(group_by_target)
+            .print_immediately(print_immediately)
     };
 
     // Perform the search, walking the filesystem, detecting matches,
@@ -82,11 +70,24 @@ async fn main() {
     // terminated, the printer thread is likely still processing
     // the results sent to it).
     let status = {
-        let searcher = SearcherBuilder::new(matcher, printer_sender).build();
-        searcher.search(&user_input.targets).await
+        if user_input.synchronous_printer {
+            let printer = print_builder.build_blocking();
+            let searcher = SearcherBuilder::new(matcher, printer).build();
+            searcher.search(&user_input.targets).await
+        } else {
+            let (printer, join_handle) = print_builder.spawn_threaded();
+            let searcher = SearcherBuilder::new(matcher, printer).build();
+            let result = searcher.search(&user_input.targets).await;
+
+            drop(searcher);
+
+            join_handle.join().expect("Couldn't join printing thread.");
+
+            result
+        }
     };
 
-    // time_log.log_search_duration();
+    time_log.log_search_duration();
 
     // The printer thread stays alive as long as any channel senders exist.
     // At this point, we've queued up all our searches, so now we must wait
@@ -95,20 +96,19 @@ async fn main() {
     // let print_time_log = printer_handle
     //     .join()
     //     .expect("Failed to join the printer thread.");
-
     // time_log.print_duration = print_time_log.print_duration;
     // time_log.printer_spawn_to_print = print_time_log.printer_spawn_to_print;
     // time_log.first_result_to_first_print = print_time_log.first_result_to_first_print;
 
-    // if let Err(Error::TargetsNotFound(targets)) = &status {
-    //     eprintln!("\nInvalid targets specified: {:?}", targets);
-    // }
+    if let Err(Error::TargetsNotFound(targets)) = &status {
+        eprintln!("\nInvalid targets specified: {:?}", targets);
+    }
 
-    // time_log.log_start_die_duration();
-    // if user_input.stats && status.is_ok() {
-    //     let stats = status.unwrap();
-    //     println!("{}", format_stats(&stats, &time_log));
-    // }
+    time_log.log_start_die_duration();
+    if user_input.stats && status.is_ok() {
+        let stats = status.unwrap();
+        println!("{}", format_stats(&stats, &time_log));
+    }
 }
 
 fn print_help() {
