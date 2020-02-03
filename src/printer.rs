@@ -335,8 +335,8 @@ pub(crate) mod threaded_printer {
         }
 
         pub(super) fn listen(&mut self) -> TimeLog {
-            let stdout = StandardStream::stdout(ColorChoice::Auto);
-            let mut stdout = stdout.lock();
+            let mut stdout = StandardStream::stdout(ColorChoice::Auto);
+            // let mut stdout = stdout.lock();
 
             // At first, the instant represents 'spawn-to-first-print'.
             let spawn_to_print_instant = Instant::now();

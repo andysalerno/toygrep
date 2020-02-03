@@ -172,6 +172,7 @@ where
         R: Read + std::marker::Unpin,
     {
         use stats::ReadStats;
+        dbg!("Starting a real search of a file.");
 
         let start = Instant::now();
 
@@ -213,6 +214,8 @@ where
         stats.reader_search_dur = start.elapsed();
         stats.max_buffer_size = buffer.inner_buf_len();
 
+        dbg!("All done searching a file.");
+
         stats
     }
 
@@ -232,20 +235,22 @@ where
             }
         };
 
-        // let file_size_bytes = fs::metadata(path)
-        //     .await
-        //     .expect("failed getting metadata")
-        //     .len();
+        let file_size_bytes = fs::metadata(path)
+            .await
+            .expect("failed getting metadata")
+            .len();
 
         let rdr = BufReader::new(file);
 
-        // let start_size_bytes = usize::min(file_size_bytes as usize, MAX_BUFF_START_LEN);
+        let start_size_bytes = usize::min(file_size_bytes as usize, MAX_BUFF_START_LEN);
 
         // let line_buf = AsyncLineBufferBuilder::new()
         //     .with_start_size_bytes(start_size_bytes)
         //     .build();
 
-        let line_buf = buf_pool.acquire().await;
+        dbg!("Acquiring a buffer from the pool.");
+
+        let line_buf = buf_pool.acquire(start_size_bytes).await;
 
         let mut line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf).line_nums(true);
 
@@ -257,6 +262,8 @@ where
         buf_pool
             .return_to_pool(line_buf_rdr.take_line_buffer())
             .await;
+
+        dbg!("Returned my buffer to the pool.");
 
         search_result
     }
@@ -303,10 +310,14 @@ where
                 } else if dir_child.is_dir().await {
                     dir_walk.push_back(dir_child);
                 }
+
+                async_std::task::yield_now().await;
             }
         }
 
         agg_stats.filesystem_walk_dur = start.elapsed();
+
+        dbg!("Done dir walking.");
 
         for task in spawned_tasks {
             let read_stats = task.await;
