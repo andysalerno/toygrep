@@ -1,4 +1,5 @@
-use crate::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
+use crate::buffer::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
+use crate::buffer::buffer_pool::BufferPool;
 use crate::error::{Error, Result};
 use crate::matcher::Matcher;
 use crate::printer::{PrintMessage, PrintableResult, PrinterSender};
@@ -7,12 +8,13 @@ use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;
 use async_std::prelude::*;
+use async_std::sync::Arc;
 use std::collections::VecDeque;
 use std::time::Instant;
 
 // Buffers for files will be created with at least enough room to hold the
 // whole file -- up until this maximum.
-const MAX_BUFF_START_LEN: usize = 1_000_000;
+const MAX_BUFF_START_LEN: usize = 8_000;
 
 // How many bytes must we check to be reasonably sure the input isn't binary?
 const BINARY_CHECK_LEN_BYTES: usize = 512;
@@ -49,6 +51,10 @@ pub(crate) mod stats {
         /// Might be an aggregated time (if the returning method searches multiple readers)
         /// or a time for only one reader (if the returning method only searches one reader).
         pub(crate) reader_search_dur: Duration,
+
+        pub(crate) max_buffer_size: usize,
+
+        pub(crate) buffers_created: usize,
     }
 
     impl ReadStats {
@@ -60,6 +66,8 @@ pub(crate) mod stats {
             self.lines_matched_bytes += other.lines_matched_bytes;
             self.filesystem_walk_dur += other.filesystem_walk_dur;
             self.reader_search_dur += other.reader_search_dur;
+            self.max_buffer_size = usize::max(self.max_buffer_size, other.max_buffer_size);
+            self.buffers_created += other.buffers_created;
         }
     }
 }
@@ -114,6 +122,8 @@ where
 
         let mut error_paths = Vec::new();
 
+        let buf_pool = Arc::new(BufferPool::new());
+
         for target in targets {
             let matcher = self.matcher.clone();
             let printer = self.printer.clone();
@@ -123,15 +133,16 @@ where
                     let file_rdr = BufReader::new(async_std::io::stdin());
                     let line_buf = AsyncLineBufferBuilder::new().build();
 
-                    let line_rdr = AsyncLineBufferReader::new(file_rdr, line_buf).line_nums(false);
+                    let mut line_rdr =
+                        AsyncLineBufferReader::new(file_rdr, line_buf).line_nums(false);
 
-                    Searcher::search_via_reader(matcher, line_rdr, None, printer.clone()).await
+                    Searcher::search_via_reader(matcher, &mut line_rdr, None, printer.clone()).await
                 }
                 Target::Path(path) => {
                     if path.is_file().await {
-                        Searcher::search_file(path, matcher, printer).await
+                        Searcher::search_file(path, matcher, printer, buf_pool.clone()).await
                     } else if path.is_dir().await {
-                        Searcher::search_directory(path, matcher, printer).await
+                        Searcher::search_directory(path, matcher, printer, buf_pool.clone()).await
                     } else {
                         error_paths.push(format!("{}", path.display()));
                         stats::ReadStats::default()
@@ -142,6 +153,8 @@ where
             agg_stats.fold_in(&stats);
         }
 
+        agg_stats.buffers_created = buf_pool.pool_size().await;
+
         if error_paths.is_empty() {
             Ok(agg_stats)
         } else {
@@ -151,7 +164,7 @@ where
 
     async fn search_via_reader<R>(
         matcher: M,
-        mut buffer: AsyncLineBufferReader<R>,
+        buffer: &mut AsyncLineBufferReader<R>,
         name: Option<String>,
         printer: P,
     ) -> stats::ReadStats
@@ -198,11 +211,17 @@ where
 
         stats.non_utf8_bytes_checked = binary_bytes_checked;
         stats.reader_search_dur = start.elapsed();
+        stats.max_buffer_size = buffer.inner_buf_len();
 
         stats
     }
 
-    async fn search_file(path: &Path, matcher: M, printer: P) -> stats::ReadStats {
+    async fn search_file(
+        path: &Path,
+        matcher: M,
+        printer: P,
+        buf_pool: Arc<BufferPool>,
+    ) -> stats::ReadStats {
         let file = {
             let f = File::open(path).await;
 
@@ -213,25 +232,41 @@ where
             }
         };
 
-        let file_size_bytes = fs::metadata(path)
-            .await
-            .expect("failed getting metadata")
-            .len();
+        // let file_size_bytes = fs::metadata(path)
+        //     .await
+        //     .expect("failed getting metadata")
+        //     .len();
+
         let rdr = BufReader::new(file);
 
-        let min_read_size = usize::min(file_size_bytes as usize + 64, MAX_BUFF_START_LEN);
+        // let start_size_bytes = usize::min(file_size_bytes as usize, MAX_BUFF_START_LEN);
 
-        let line_buf = AsyncLineBufferBuilder::new()
-            .with_start_size_bytes(min_read_size)
-            .build();
-        let line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf).line_nums(true);
+        // let line_buf = AsyncLineBufferBuilder::new()
+        //     .with_start_size_bytes(start_size_bytes)
+        //     .build();
+
+        let line_buf = buf_pool.acquire().await;
+
+        let mut line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf).line_nums(true);
 
         let target_name = Some(path.to_string_lossy().to_string());
 
-        Searcher::search_via_reader(matcher, line_buf_rdr, target_name, printer).await
+        let search_result =
+            Searcher::search_via_reader(matcher, &mut line_buf_rdr, target_name, printer).await;
+
+        buf_pool
+            .return_to_pool(line_buf_rdr.take_line_buffer())
+            .await;
+
+        search_result
     }
 
-    async fn search_directory(directory_path: &Path, matcher: M, printer: P) -> stats::ReadStats {
+    async fn search_directory(
+        directory_path: &Path,
+        matcher: M,
+        printer: P,
+        buf_pool: Arc<BufferPool>,
+    ) -> stats::ReadStats {
         let start = Instant::now();
 
         let mut agg_stats = stats::ReadStats::default();
@@ -257,10 +292,11 @@ where
                 if dir_child.is_file().await {
                     let printer = printer.clone();
                     let matcher = matcher.clone();
+                    let buf_pool = buf_pool.clone();
 
                     let task = async_std::task::spawn(async move {
                         let dir_child_path: &Path = &dir_child;
-                        Searcher::search_file(dir_child_path, matcher, printer).await
+                        Searcher::search_file(dir_child_path, matcher, printer, buf_pool).await
                     });
 
                     spawned_tasks.push(task);

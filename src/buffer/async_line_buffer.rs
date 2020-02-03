@@ -32,7 +32,7 @@ impl AsyncLineBufferBuilder {
     pub(crate) fn new() -> Self {
         Self {
             line_break_byte: b'\n',
-            start_size_bytes: 16_000,
+            start_size_bytes: 8_000,
         }
     }
 
@@ -54,6 +54,7 @@ impl AsyncLineBufferBuilder {
             line_break_idxs: VecDeque::new(),
             start: 0,
             end: 0,
+            refresh_count: 0,
         }
     }
 }
@@ -67,7 +68,7 @@ impl AsyncLineBufferBuilder {
 /// initialize this with at least as much pre-allocated space
 /// as the file size (for reasonably sized files)
 /// so only one read from the file will be necessary.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct AsyncLineBuffer {
     /// The internal buffer.
     buffer: Vec<u8>,
@@ -99,6 +100,10 @@ pub(crate) struct AsyncLineBuffer {
     /// of our written segment.
     /// E.g., if our written segment has len 0, this is 0.
     end: usize,
+
+    /// For diagnostics -- how many times has this buffer been "refreshed",
+    /// allowing it to be used again?
+    refresh_count: usize,
 }
 
 impl AsyncLineBuffer {
@@ -137,6 +142,15 @@ impl AsyncLineBuffer {
         self.end += bytes_count;
 
         bytes_count != 0
+    }
+
+    /// Refreshes this buffer into a clean state
+    /// so it can be used once again.
+    pub(crate) fn refresh(&mut self) {
+        self.start = 0;
+        self.end = 0;
+        self.line_break_idxs.clear();
+        self.refresh_count += 1;
     }
 
     /// Returns a writable slice for the portion
@@ -274,6 +288,12 @@ where
         // else it has already been completely exhausted.
         let line = self.line_buffer.consume_line();
         line.map(|l| LineResult::new(l, line_num))
+    }
+
+    /// Takes the line buffer from this Reader,
+    /// so it may be used again. Consumes self.
+    pub(crate) fn take_line_buffer(self) -> AsyncLineBuffer {
+        self.line_buffer
     }
 }
 

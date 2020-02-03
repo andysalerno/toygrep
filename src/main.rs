@@ -15,7 +15,7 @@
 )]
 
 mod arg_parse;
-mod async_line_buffer;
+mod buffer;
 mod error;
 mod matcher;
 mod printer;
@@ -137,6 +137,8 @@ fn format_stats(read_stats: &ReadStats, time_log: &TimeLog) -> String {
 {} total bytes checked for non-utf8 detection
 {} matching lines found
 {} total bytes in matching lines
+{max_buf_size} maximum buffer size (bytes)
+{buffers_created} buffers created
 {startstop} seconds start-to-stop
 {filesystem} seconds recursing through filesystem
 {search} seconds searching
@@ -169,5 +171,7 @@ fn format_stats(read_stats: &ReadStats, time_log: &TimeLog) -> String {
             .print_duration
             .map(|d| d.as_secs_f32().to_string())
             .unwrap_or_else(|| "(not measured)".into()),
+        max_buf_size = read_stats.max_buffer_size,
+        buffers_created = read_stats.buffers_created,
     )
 }
