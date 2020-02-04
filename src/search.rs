@@ -14,7 +14,7 @@ use std::time::Instant;
 
 // Buffers for files will be created with at least enough room to hold the
 // whole file -- up until this maximum.
-const MAX_BUFF_START_LEN: usize = 8_000;
+const MAX_BUFF_START_LEN: usize = 6_000_000;
 
 // How many bytes must we check to be reasonably sure the input isn't binary?
 const BINARY_CHECK_LEN_BYTES: usize = 512;
@@ -263,7 +263,7 @@ where
             .return_to_pool(line_buf_rdr.take_line_buffer())
             .await;
 
-        dbg!("Returned my buffer to the pool.");
+        dbg!("Finished reading and returned my buffer to the pool.");
 
         search_result
     }
@@ -275,6 +275,8 @@ where
         buf_pool: Arc<BufferPool>,
     ) -> stats::ReadStats {
         let start = Instant::now();
+
+        dbg!("Searching directory");
 
         let mut agg_stats = stats::ReadStats::default();
 
@@ -307,11 +309,11 @@ where
                     });
 
                     spawned_tasks.push(task);
+
+                    dbg!("Spawned search task.");
                 } else if dir_child.is_dir().await {
                     dir_walk.push_back(dir_child);
                 }
-
-                async_std::task::yield_now().await;
             }
         }
 

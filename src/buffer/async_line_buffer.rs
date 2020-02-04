@@ -175,6 +175,7 @@ impl AsyncLineBuffer {
         let cur_factor = usize::max(1, self.buffer.len());
         let grow_to = cur_factor * 2;
         self.buffer.resize(grow_to, 0u8);
+        dbg!("Buffer grew to {}", grow_to);
     }
 
     /// Retrieve a slice containing the next line,
