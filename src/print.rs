@@ -52,7 +52,8 @@ pub(crate) enum PrintMessage {
     Display(String),
 }
 
-pub(super) struct Config {
+/// Config values used internally to construct a printer.
+struct Config {
     print_line_num: bool,
     group_by_target: bool,
     print_immediately: bool,

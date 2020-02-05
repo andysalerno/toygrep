@@ -11,7 +11,7 @@ pub(crate) struct Sender {
 }
 
 impl Sender {
-    pub(crate) fn new(sender: mpsc::Sender<PrintMessage>) -> Self {
+    pub(super) fn new(sender: mpsc::Sender<PrintMessage>) -> Self {
         Self { sender }
     }
 }
@@ -24,7 +24,7 @@ impl PrinterSender for Sender {
 
 /// A simple printer that can be spawned on a separate thread,
 /// and receive messages to print from the `Sender`.
-pub(crate) struct Printer<M: Matcher> {
+pub(super) struct Printer<M: Matcher> {
     receiver: mpsc::Receiver<PrintMessage>,
     printer: PrettyPrinter<M>,
 }
