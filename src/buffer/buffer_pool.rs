@@ -9,8 +9,8 @@ pub(crate) struct BufferPool {
 impl BufferPool {
     /// Get a buffer, either recycling an old one, or
     /// generating a fresh one.
-    pub(crate) async fn acquire(&self, size_hint: usize) -> AsyncLineBuffer {
-        Self::generate_new(size_hint)
+    pub(crate) async fn acquire(&self) -> AsyncLineBuffer {
+        Self::generate_new()
         // self.try_get_existing()
         //     .await
         //     .unwrap_or_else(|| Self::generate_new(size_hint))
@@ -29,21 +29,19 @@ impl BufferPool {
         Self { pool }
     }
 
-    pub(crate) async fn return_to_pool(&self, mut buf: AsyncLineBuffer) {
-        // buf.refresh();
-        // self.pool.lock().await.push(buf);
-    }
+    // pub(crate) async fn return_to_pool(&self, mut buf: AsyncLineBuffer) {
+    //     // buf.refresh();
+    //     // self.pool.lock().await.push(buf);
+    // }
 
-    pub(crate) async fn pool_size(&self) -> usize {
-        10
-        // dbg!(self.pool.lock().await.len())
-    }
+    // pub(crate) async fn pool_size(&self) -> usize {
+    //     10
+    //     // dbg!(self.pool.lock().await.len())
+    // }
 
-    fn generate_new(size_hint: usize) -> AsyncLineBuffer {
+    fn generate_new() -> AsyncLineBuffer {
         // let size_hint = dbg!(usize::min(6_000_000, size_hint));
 
-        AsyncLineBufferBuilder::new()
-            .with_start_size_bytes(size_hint)
-            .build()
+        AsyncLineBufferBuilder::new().build()
     }
 }

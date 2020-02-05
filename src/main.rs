@@ -18,13 +18,13 @@ mod arg_parse;
 mod buffer;
 mod error;
 mod matcher;
-mod printer;
+mod print;
 mod search;
 mod target;
 mod time_log;
 
 use crate::error::Error;
-use crate::printer::Printer;
+use crate::print::Printer;
 use crate::search::stats::ReadStats;
 use crate::search::SearcherBuilder;
 use crate::time_log::TimeLog;

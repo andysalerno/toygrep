@@ -1,8 +1,8 @@
 use crate::buffer::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
-use crate::buffer::buffer_pool::BufferPool;
+use crate::buffer::BufferPool;
 use crate::error::{Error, Result};
 use crate::matcher::Matcher;
-use crate::printer::{PrintMessage, PrintableResult, PrinterSender};
+use crate::print::{PrintMessage, PrintableResult, PrinterSender};
 use crate::target::Target;
 use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
@@ -11,10 +11,6 @@ use async_std::prelude::*;
 use async_std::sync::Arc;
 use std::collections::VecDeque;
 use std::time::Instant;
-
-// Buffers for files will be created with at least enough room to hold the
-// whole file -- up until this maximum.
-const MAX_BUFF_START_LEN: usize = 6_000_000;
 
 // How many bytes must we check to be reasonably sure the input isn't binary?
 const BINARY_CHECK_LEN_BYTES: usize = 512;
@@ -153,7 +149,7 @@ where
             agg_stats.fold_in(&stats);
         }
 
-        agg_stats.buffers_created = buf_pool.pool_size().await;
+        // agg_stats.buffers_created = buf_pool.pool_size().await;
 
         if error_paths.is_empty() {
             Ok(agg_stats)
@@ -242,15 +238,9 @@ where
 
         let rdr = BufReader::new(file);
 
-        let start_size_bytes = usize::min(file_size_bytes as usize, MAX_BUFF_START_LEN);
-
-        // let line_buf = AsyncLineBufferBuilder::new()
-        //     .with_start_size_bytes(start_size_bytes)
-        //     .build();
-
         dbg!("Acquiring a buffer from the pool.");
 
-        let line_buf = buf_pool.acquire(start_size_bytes).await;
+        let line_buf = buf_pool.acquire().await;
 
         let mut line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf).line_nums(true);
 
@@ -259,9 +249,9 @@ where
         let search_result =
             Searcher::search_via_reader(matcher, &mut line_buf_rdr, target_name, printer).await;
 
-        buf_pool
-            .return_to_pool(line_buf_rdr.take_line_buffer())
-            .await;
+        // buf_pool
+        //     .return_to_pool(line_buf_rdr.take_line_buffer())
+        //     .await;
 
         dbg!("Finished reading and returned my buffer to the pool.");
 

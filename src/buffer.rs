@@ -1,2 +1,4 @@
 pub(crate) mod async_line_buffer;
-pub(crate) mod buffer_pool;
+mod buffer_pool;
+
+pub(crate) use buffer_pool::BufferPool;

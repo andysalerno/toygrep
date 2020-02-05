@@ -32,7 +32,7 @@ impl AsyncLineBufferBuilder {
     pub(crate) fn new() -> Self {
         Self {
             line_break_byte: b'\n',
-            start_size_bytes: 8_000,
+            start_size_bytes: 8 * (1 << 10),
         }
     }
 
