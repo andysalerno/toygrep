@@ -209,7 +209,7 @@ impl AsyncLineBuffer {
     /// Clear out the consumed portion of the buffer
     /// by rolling the unconsumed content back to the front.
     fn roll_to_front(&mut self) {
-        if self.start == 0 {
+        if self.start == 0 || self.start == self.end {
             // Start is already flush with the beginning of the buffer.
             return;
         }
