@@ -54,8 +54,6 @@ impl AsyncLineBufferBuilder {
             line_break_idxs: VecDeque::new(),
             start: 0,
             end: 0,
-            refresh_count: 0,
-            bytes_rolled: 0,
         }
     }
 }
@@ -101,12 +99,6 @@ pub(crate) struct AsyncLineBuffer {
     /// of our written segment.
     /// E.g., if our written segment has len 0, this is 0.
     end: usize,
-
-    /// For diagnostics -- how many times has this buffer been "refreshed",
-    /// allowing it to be used again?
-    refresh_count: usize,
-
-    bytes_rolled: usize,
 }
 
 impl AsyncLineBuffer {
@@ -153,7 +145,6 @@ impl AsyncLineBuffer {
         self.start = 0;
         self.end = 0;
         self.line_break_idxs.clear();
-        self.refresh_count += 1;
     }
 
     /// Returns a writable slice for the portion
@@ -219,7 +210,6 @@ impl AsyncLineBuffer {
         }
 
         self.buffer.copy_within(self.start..self.end, 0);
-        self.bytes_rolled += self.end - self.start;
 
         let left_shift_len = self.start;
         self.end -= left_shift_len;
