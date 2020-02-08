@@ -18,7 +18,6 @@ impl Sender {
 
 impl PrinterSender for Sender {
     fn send(&self, message: PrintMessage) {
-        dbg!("Sending print message.");
         self.sender.send(message).expect("Failed sending message.");
     }
 }
@@ -52,7 +51,6 @@ impl<M: Matcher + 'static> Printer<M> {
         let mut time_log = TimeLog::new(spawn_to_print_instant);
 
         while let Ok(message) = self.receiver.recv() {
-            dbg!("Received print message");
             self.printer.print(&mut stdout, message);
         }
 

@@ -168,7 +168,6 @@ where
         R: Read + std::marker::Unpin,
     {
         use stats::ReadStats;
-        dbg!("Starting a real search of a file.");
 
         let start = Instant::now();
 
@@ -210,8 +209,6 @@ where
         stats.reader_search_dur = start.elapsed();
         stats.max_buffer_size = buffer.inner_buf_len();
 
-        dbg!("All done searching a file.");
-
         stats
     }
 
@@ -233,22 +230,19 @@ where
 
         let rdr = BufReader::new(file);
 
-        dbg!("Acquiring a buffer from the pool.");
-
         let line_buf = buf_pool.acquire().await;
 
         let mut line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf).line_nums(true);
 
         let target_name = Some(path.to_string_lossy().to_string());
 
-        let search_result =
-            Searcher::search_via_reader(matcher, &mut line_buf_rdr, target_name, printer).await;
+        let search_result = async_std::task::block_on(async {
+            Searcher::search_via_reader(matcher, &mut line_buf_rdr, target_name, printer).await
+        });
 
         // buf_pool
         //     .return_to_pool(line_buf_rdr.take_line_buffer())
         //     .await;
-
-        dbg!("Finished reading and returned my buffer to the pool.");
 
         search_result
     }
@@ -260,8 +254,6 @@ where
         buf_pool: Arc<BufferPool>,
     ) -> stats::ReadStats {
         let start = Instant::now();
-
-        dbg!("Searching directory");
 
         let mut agg_stats = stats::ReadStats::default();
 
@@ -294,8 +286,6 @@ where
                     });
 
                     spawned_tasks.push(task);
-
-                    dbg!("Spawned search task.");
                 } else if dir_child.is_dir().await {
                     dir_walk.push_back(dir_child);
                 }
@@ -303,8 +293,6 @@ where
         }
 
         agg_stats.filesystem_walk_dur = start.elapsed();
-
-        dbg!("Done dir walking.");
 
         for task in spawned_tasks {
             let read_stats = task.await;
