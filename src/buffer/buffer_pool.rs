@@ -3,7 +3,7 @@ use async_std::sync::Mutex;
 
 #[derive(Default, Debug)]
 pub(crate) struct BufferPool {
-    pool: Mutex<Vec<AsyncLineBuffer>>,
+    // pool: Mutex<Vec<AsyncLineBuffer>>,
 }
 
 impl BufferPool {
@@ -24,9 +24,10 @@ impl BufferPool {
         //         .collect(),
         // );
 
-        let pool = Default::default();
+        // let pool = Default::default();
 
-        Self { pool }
+        // Self { pool }
+        BufferPool {}
     }
 
     // pub(crate) async fn return_to_pool(&self, mut buf: AsyncLineBuffer) {

@@ -231,11 +231,6 @@ where
             }
         };
 
-        let file_size_bytes = fs::metadata(path)
-            .await
-            .expect("failed getting metadata")
-            .len();
-
         let rdr = BufReader::new(file);
 
         dbg!("Acquiring a buffer from the pool.");
