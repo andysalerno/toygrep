@@ -30,7 +30,6 @@ use crate::search::SearcherBuilder;
 use crate::time_log::TimeLog;
 use matcher::RegexMatcherBuilder;
 use std::clone::Clone;
-use std::path::PathBuf;
 use std::time::Instant;
 
 #[async_std::main]
@@ -40,7 +39,7 @@ async fn main() {
     let mut time_log = TimeLog::new(Instant::now());
 
     if user_input.search_pattern.is_empty() {
-        print_help();
+        arg_parse::print_help();
         return;
     }
 
@@ -110,24 +109,6 @@ async fn main() {
         let stats = status.unwrap();
         println!("{}", format_stats(&stats, &time_log));
     }
-}
-
-fn print_help() {
-    let exec_name: String = {
-        let canonical = PathBuf::from(std::env::args().next().unwrap());
-        let os_str = canonical.file_name().unwrap();
-        os_str.to_string_lossy().into()
-    };
-
-    println!(
-        "Usage:
-{} [OPTION]... PATTERN [FILE]...
-    Options:
-    -i, --case-insensitive      Case insensitive match.
-    -w, --whole-word            Match whole word.
-    -t, --stats                 Print statistical information with output.",
-        exec_name
-    );
 }
 
 fn format_stats(read_stats: &ReadStats, time_log: &TimeLog) -> String {

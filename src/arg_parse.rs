@@ -1,5 +1,6 @@
 use crate::target::Target;
 use peeking_take_while::PeekableExt;
+use std::path::PathBuf;
 
 #[derive(Debug, Default)]
 pub(crate) struct UserInput {
@@ -12,6 +13,25 @@ pub(crate) struct UserInput {
     pub(crate) targets: Vec<Target>,
 
     pub(crate) stats: bool,
+}
+
+pub(crate) fn print_help() {
+    let exec_name: String = {
+        let canonical = PathBuf::from(std::env::args().next().unwrap());
+        let os_str = canonical.file_name().unwrap();
+        os_str.to_string_lossy().into()
+    };
+
+    println!(
+        "Usage:
+{} [OPTION]... PATTERN [FILE]...
+    Options:
+    -i, --case-insensitive      Case insensitive match.
+    -w, --whole-word            Match whole word.
+    -t, --stats                 Print statistical information with output.,
+    -p, --sync-print            Print synchronous with searching, instead of spawning a dedicated print thread.",
+        exec_name
+    );
 }
 
 /// Parses the given arguments, following this expected format:

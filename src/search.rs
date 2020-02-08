@@ -149,7 +149,7 @@ where
             agg_stats.fold_in(&stats);
         }
 
-        // agg_stats.buffers_created = buf_pool.pool_size().await;
+        agg_stats.buffers_created = buf_pool.pool_size().await;
 
         if error_paths.is_empty() {
             Ok(agg_stats)
@@ -240,9 +240,9 @@ where
             Searcher::search_via_reader(matcher, &mut line_buf_rdr, target_name, printer).await
         });
 
-        // buf_pool
-        //     .return_to_pool(line_buf_rdr.take_line_buffer())
-        //     .await;
+        buf_pool
+            .return_to_pool(line_buf_rdr.take_line_buffer())
+            .await;
 
         search_result
     }

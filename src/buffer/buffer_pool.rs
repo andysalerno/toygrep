@@ -3,46 +3,43 @@ use async_std::sync::Mutex;
 
 #[derive(Default, Debug)]
 pub(crate) struct BufferPool {
-    // pool: Mutex<Vec<AsyncLineBuffer>>,
+    pool: Mutex<Vec<AsyncLineBuffer>>,
 }
 
 impl BufferPool {
     /// Get a buffer, either recycling an old one, or
     /// generating a fresh one.
     pub(crate) async fn acquire(&self) -> AsyncLineBuffer {
-        Self::generate_new()
-        // self.try_get_existing()
-        //     .await
-        //     .unwrap_or_else(|| Self::generate_new(size_hint))
+        self.try_get_existing()
+            .await
+            .unwrap_or_else(Self::generate_new)
     }
 
     pub(crate) fn new() -> BufferPool {
-        // let default_size_hint = 8_000;
-        // let pool = Mutex::new(
-        //     (0..4)
-        //         .map(|_| Self::generate_new(default_size_hint))
-        //         .collect(),
-        // );
+        let pool = Mutex::new((0..4).map(|_| Self::generate_new()).collect());
 
-        // let pool = Default::default();
-
-        // Self { pool }
-        BufferPool {}
+        Self { pool }
     }
 
-    // pub(crate) async fn return_to_pool(&self, mut buf: AsyncLineBuffer) {
-    //     // buf.refresh();
-    //     // self.pool.lock().await.push(buf);
-    // }
+    pub(crate) async fn return_to_pool(&self, buf: AsyncLineBuffer) {
+        self.pool.lock().await.push(buf);
+    }
 
-    // pub(crate) async fn pool_size(&self) -> usize {
-    //     10
-    //     // dbg!(self.pool.lock().await.len())
-    // }
+    pub(crate) async fn pool_size(&self) -> usize {
+        self.pool.lock().await.len()
+    }
 
     fn generate_new() -> AsyncLineBuffer {
-        // let size_hint = dbg!(usize::min(6_000_000, size_hint));
-
         AsyncLineBufferBuilder::new().build()
+    }
+
+    async fn try_get_existing(&self) -> Option<AsyncLineBuffer> {
+        let maybe_buf = self.pool.lock().await.pop();
+
+        maybe_buf.and_then(|mut b| {
+            b.refresh();
+
+            Some(b)
+        })
     }
 }
