@@ -17,6 +17,7 @@ use termcolor::{Color, ColorSpec, WriteColor};
 
 pub(super) struct PrettyPrinter<M: Matcher> {
     file_to_matches: HashMap<String, Vec<PrintableResult>>,
+    currently_printing_file: Option<String>,
     config: Config,
     matcher: Option<M>,
 }
@@ -27,6 +28,7 @@ impl<M: Matcher> PrettyPrinter<M> {
             matcher,
             config,
             file_to_matches: HashMap::new(),
+            currently_printing_file: None,
         }
     }
 
@@ -40,15 +42,31 @@ impl<M: Matcher> PrettyPrinter<M> {
                     print!("{}", msg);
                 }
                 PrintMessage::Printable(printable) => {
-                    let line_results = self
-                        .file_to_matches
-                        .entry(printable.target_name.to_owned())
-                        .or_default();
+                    if self.currently_printing_file == None {
+                        self.currently_printing_file = Some(printable.target_name.clone());
 
-                    line_results.push(printable);
+                        // Print everything we've already stored for this file:
+                        let _ = self.print_target_results(&mut writer, &printable.target_name);
+                    }
+
+                    if Some(&printable.target_name) == self.currently_printing_file.as_ref() {
+                        let _ = self.print_line_result(&mut writer, printable);
+                    } else {
+                        let line_results = self
+                            .file_to_matches
+                            .entry(printable.target_name.to_owned())
+                            .or_default();
+
+                        line_results.push(printable);
+                    }
                 }
                 PrintMessage::EndOfReading { target_name } => {
-                    let _ = self.print_target_results(&mut writer, &target_name);
+                    if Some(&target_name) == self.currently_printing_file.as_ref() {
+                        self.currently_printing_file = None;
+                    }
+                    else {
+                        let _ = self.print_target_results(&mut writer, &target_name);
+                    }
                 }
             }
         } else if let PrintMessage::Printable(printable) = message {
