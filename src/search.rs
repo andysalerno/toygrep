@@ -245,6 +245,20 @@ where
         search_result
     }
 
+    /// Given a directory path, descend down the whole tree,
+    /// performing a search on every file found,
+    /// and recursively visiting descendant directories.
+    /// 
+    /// Note: this is a major simplification compared to how
+    /// Ripgrep works. I believe it is possibly the biggest contributor
+    /// to why Toygrep is much slower than Ripgrep on some workloads.
+    /// 
+    /// Toygrep's current appraoch is this (as seen in the code below):
+    /// An outermost loop, on one thread, descends through every directory,
+    /// and fires off an async task whenever a file is encountered.
+    /// 
+    /// In comparison, Ripgrip will spawn some number of workers, and they share
+    /// a global queue of directories to visit, and descend independently of any outer loop.
     async fn search_directory(
         directory_path: &Path,
         matcher: M,
