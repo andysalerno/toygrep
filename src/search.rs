@@ -1,4 +1,4 @@
-use crate::buffer::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader};
+use crate::buffer::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader, AsyncLineBuffer};
 use crate::buffer::BufferPool;
 use crate::error::{Error, Result};
 use crate::matcher::Matcher;
@@ -114,10 +114,9 @@ where
     /// and send the results to the given `Printer`.
     /// `Ok` if every target is an available file or directory (or stdin).
     /// `Err` with a list of failed paths if any of the paths are invalid.
-    pub(crate) async fn search(&self, targets: &'_ [Target]) -> Result<stats::ReadStats> {
-        let mut agg_stats = stats::ReadStats::default();
-
-        let mut error_paths = Vec::new();
+    pub(crate) async fn search(&self, targets: &'_ [Target]) -> Result<stats::ReadStats> {where M: Matcher,
+        P: PrinterSender,
+        R: Read,;
 
         let buf_pool = Arc::new(BufferPool::new());
 
@@ -217,7 +216,7 @@ where
         path: &Path,
         matcher: M,
         printer: P,
-        buf_pool: Arc<BufferPool>,
+        line_buffer: AsyncLineBuffer
     ) -> stats::ReadStats {
         let file = {
             let f = File::open(path).await;
@@ -231,18 +230,12 @@ where
 
         let rdr = BufReader::new(file);
 
-        let line_buf = buf_pool.acquire().await;
-
-        let mut line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf).line_nums(true);
+        let mut line_buf_rdr = AsyncLineBufferReader::new(line_buffer, line_buf).line_nums(true);
 
         let target_name = Some(path.to_string_lossy().to_string());
 
         let search_result =
             Searcher::search_via_reader(matcher, &mut line_buf_rdr, target_name, printer).await;
-
-        buf_pool
-            .return_to_pool(line_buf_rdr.take_line_buffer())
-            .await;
 
         search_result
     }
@@ -324,9 +317,9 @@ where
     ) -> stats::ReadStats {
         use crate::walker_worker::WorkerPool;
 
-        let worker_pool = WorkerPool::spawn(SearchHandler, 8);
+        let worker_pool = WorkerPool::spawn(SearchHandler, directory_path.into(), 8).await;
 
-        todo!()
+        stats::ReadStats::default()
     }
 }
 
@@ -335,10 +328,25 @@ fn check_utf8(bytes: &[u8]) -> bool {
 }
 
 #[derive(Clone)]
-struct SearchHandler;
+struct SearchHandler<M, P, R>
+where M: Matcher,
+    P: PrinterSender,
+    R: Read,
+{
+    matcher: M,
+    printer: P,
+    buffer: AsyncLineBufferReader<R>
+}
 
-impl WorkHandler for SearchHandler {
+impl<M, P, R> WorkHandler for SearchHandler<M, P, R>
+where M: Matcher,
+    P: PrinterSender,
+    R: Read,
+{
     fn handle_work(&self, work: async_std::path::PathBuf) {
-        println!("Working!");
+        let matcher = self.matcher.clone();
+        let printer = self.printer.clone();
+
+        Searcher::search_file(work, matcher, printer, buf_pool);
     }
 }

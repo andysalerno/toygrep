@@ -51,7 +51,7 @@ impl<T: WorkHandler> WalkerWorker<T> {
         }
     }
 
-    async fn start_working(self) {
+    async fn start_working(&mut self) {
         while let Some(path) = self.visit_queue.pop_visit_blocking() {
             if path.is_file().await {
                 self.work_handler.handle_work(path);
@@ -70,16 +70,31 @@ pub(crate) struct WorkerPool<T: WorkHandler> {
     workers: Vec<WalkerWorker<T>>,
 }
 
-impl<T: WorkHandler> WorkerPool<T> {
-    pub(crate) fn spawn(handler: T, initial_count: usize) -> Self {
+impl<T: WorkHandler + Send + 'static> WorkerPool<T> {
+    pub(crate) async fn spawn(handler: T, path: PathBuf, initial_count: usize) -> Self {
         let mut workers = vec![];
 
-        let sharable_queue = VisitQueue::new();
+        let mut sharable_queue = VisitQueue::new();
+
+        sharable_queue.push_visit_blocking(path);
+
+        let mut work_vec = vec![];
 
         for _ in 0..initial_count {
-            let worker = WalkerWorker::new(handler.clone(), sharable_queue.clone());
-            workers.push(worker);
+            let mut worker = WalkerWorker::new(handler.clone(), sharable_queue.clone());
+
+            println!("Starting work.");
+            work_vec.push(async_std::task::spawn(async move {
+                worker.start_working().await
+            }));
         }
+
+        println!("Waiting for work to finish.");
+        for work in work_vec {
+            work.await;
+        }
+
+        println!("Done working.");
 
         Self { workers }
     }
