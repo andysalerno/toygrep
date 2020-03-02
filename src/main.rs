@@ -22,6 +22,7 @@ mod print;
 mod search;
 mod target;
 mod time_log;
+mod walker_worker;
 
 use crate::error::Error;
 use crate::print::Printer;
