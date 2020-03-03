@@ -138,7 +138,8 @@ where
                         let line_buffer = AsyncLineBufferBuilder::new().build();
                         Searcher::search_file(path, matcher, printer, line_buffer).await
                     } else if path.is_dir().await {
-                        Searcher::search_directory(path, matcher, printer, buf_pool.clone()).await
+                        let buffer = buf_pool.acquire().await;
+                        Searcher::search_directory(path, matcher, printer, buffer).await
                     } else {
                         error_paths.push(format!("{}", path.display()));
                         stats::ReadStats::default()
@@ -313,11 +314,13 @@ where
         directory_path: &Path,
         matcher: M,
         printer: P,
-        buf_pool: Arc<BufferPool>,
+        buffer: AsyncLineBuffer,
     ) -> stats::ReadStats {
         use crate::walker_worker::WorkerPool;
 
-        let worker_pool = WorkerPool::spawn(SearchHandler, directory_path.into(), 8).await;
+        let handler = SearchHandler::new(matcher, printer, buffer);
+
+        let worker_pool = WorkerPool::spawn(handler, directory_path.into(), 8).await;
 
         stats::ReadStats::default()
     }
@@ -328,25 +331,39 @@ fn check_utf8(bytes: &[u8]) -> bool {
 }
 
 #[derive(Clone)]
-struct SearchHandler<M, P, R>
+struct SearchHandler<M, P>
 where M: Matcher,
     P: PrinterSender,
-    R: Read + std::marker::Unpin,
 {
     matcher: M,
     printer: P,
-    buffer: AsyncLineBufferReader<R>
+    buffer: AsyncLineBuffer
 }
 
-impl<M, P, R> WorkHandler for SearchHandler<M, P, R>
+impl<M, P> SearchHandler<M, P>
 where M: Matcher,
     P: PrinterSender,
-    R: Read + std::marker::Unpin + Clone,
+{
+    fn new(matcher: M, printer: P, buffer: AsyncLineBuffer) -> Self {
+        Self {
+            matcher,
+            printer,
+            buffer,
+        }
+    }
+}
+
+impl<M, P> WorkHandler for SearchHandler<M, P>
+where M: Matcher + 'static,
+    P: PrinterSender + 'static,
 {
     fn handle_work(&self, work: async_std::path::PathBuf) {
         let matcher = self.matcher.clone();
         let printer = self.printer.clone();
+        let buffer = self.buffer.clone();
 
-        Searcher::search_file(work, matcher, printer, buf_pool);
+        println!("Handling work.");
+
+        Searcher::search_file(&work, matcher, printer, buffer).await;
     }
 }
