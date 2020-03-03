@@ -1,10 +1,11 @@
-use crate::buffer::async_line_buffer::{AsyncLineBufferBuilder, AsyncLineBufferReader, AsyncLineBuffer};
+use crate::buffer::async_line_buffer::{
+    AsyncLineBuffer, AsyncLineBufferBuilder, AsyncLineBufferReader,
+};
 use crate::buffer::BufferPool;
 use crate::error::{Error, Result};
 use crate::matcher::Matcher;
 use crate::print::{PrintMessage, PrintableResult, PrinterSender};
 use crate::target::Target;
-use crate::walker_worker::WorkHandler;
 use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
 use async_std::path::Path;
@@ -217,7 +218,7 @@ where
         path: &Path,
         matcher: M,
         printer: P,
-        line_buffer: AsyncLineBuffer
+        line_buffer: AsyncLineBuffer,
     ) -> stats::ReadStats {
         let file = {
             let f = File::open(path).await;
@@ -318,9 +319,13 @@ where
     ) -> stats::ReadStats {
         use crate::walker_worker::WorkerPool;
 
-        let handler = SearchHandler::new(matcher, printer, buffer);
-
-        let worker_pool = WorkerPool::spawn(handler, directory_path.into(), 8).await;
+        let worker_pool = WorkerPool::spawn(directory_path.into(), 8, |path| {
+            let printer = printer;
+            let buffer = buffer;
+            Searcher::search_file(&path, matcher, printer, buffer);
+            println!("I'm the closure, doing work.");
+        })
+        .await;
 
         stats::ReadStats::default()
     }
@@ -328,42 +333,4 @@ where
 
 fn check_utf8(bytes: &[u8]) -> bool {
     std::str::from_utf8(bytes).is_ok()
-}
-
-#[derive(Clone)]
-struct SearchHandler<M, P>
-where M: Matcher,
-    P: PrinterSender,
-{
-    matcher: M,
-    printer: P,
-    buffer: AsyncLineBuffer
-}
-
-impl<M, P> SearchHandler<M, P>
-where M: Matcher,
-    P: PrinterSender,
-{
-    fn new(matcher: M, printer: P, buffer: AsyncLineBuffer) -> Self {
-        Self {
-            matcher,
-            printer,
-            buffer,
-        }
-    }
-}
-
-impl<M, P> WorkHandler for SearchHandler<M, P>
-where M: Matcher + 'static,
-    P: PrinterSender + 'static,
-{
-    fn handle_work(&self, work: async_std::path::PathBuf) {
-        let matcher = self.matcher.clone();
-        let printer = self.printer.clone();
-        let buffer = self.buffer.clone();
-
-        println!("Handling work.");
-
-        Searcher::search_file(&work, matcher, printer, buffer).await;
-    }
 }

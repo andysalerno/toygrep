@@ -2,12 +2,6 @@ use async_std::path::PathBuf;
 use async_std::stream::StreamExt;
 use crossbeam_channel::unbounded;
 
-/// A trait describing a work handler,
-/// which knows how to work given a pathbuf that needs working.
-pub(crate) trait WorkHandler: Clone {
-    fn handle_work(&self, work: PathBuf);
-}
-
 /// A queue of paths for workers to visit.
 /// Workers can read from, and push to, this queue.
 #[derive(Clone)]
@@ -38,13 +32,19 @@ impl<T> VisitQueue<T> {
 /// A worker that can read from the VisitQueue,
 /// perform some work on the visited path,
 /// and possibly push yet another path into the VisitQueue.
-pub(crate) struct WalkerWorker<T: WorkHandler> {
+pub(crate) struct WalkerWorker<W>
+where
+    W: FnMut(PathBuf),
+{
     visit_queue: VisitQueue<PathBuf>,
-    work_handler: T,
+    work_handler: W,
 }
 
-impl<T: WorkHandler> WalkerWorker<T> {
-    fn new(work_handler: T, visit_queue: VisitQueue<PathBuf>) -> Self {
+impl<W> WalkerWorker<W>
+where
+    W: FnMut(PathBuf),
+{
+    fn new(visit_queue: VisitQueue<PathBuf>, work_handler: W) -> Self {
         Self {
             visit_queue,
             work_handler,
@@ -54,7 +54,7 @@ impl<T: WorkHandler> WalkerWorker<T> {
     async fn start_working(&mut self) {
         while let Some(path) = self.visit_queue.pop_visit_blocking() {
             if path.is_file().await {
-                self.work_handler.handle_work(path);
+                (self.work_handler)(path);
             } else if path.is_dir().await {
                 let mut dir_stream = path.read_dir().await.unwrap();
 
@@ -66,32 +66,39 @@ impl<T: WorkHandler> WalkerWorker<T> {
     }
 }
 
-pub(crate) struct WorkerPool<T: WorkHandler> {
-    workers: Vec<WalkerWorker<T>>,
+pub(crate) struct WorkerPool<W>
+where
+    W: FnMut(PathBuf),
+{
+    workers: Vec<WalkerWorker<W>>,
 }
 
-impl<T: WorkHandler + Send + 'static> WorkerPool<T> {
-    pub(crate) async fn spawn(handler: T, path: PathBuf, initial_count: usize) -> Self {
+impl<W> WorkerPool<W>
+where
+    W: FnMut(PathBuf) + std::marker::Send + Clone + 'static,
+{
+    pub(crate) async fn spawn(path: PathBuf, initial_count: usize, work_handler: W) -> Self {
         let mut workers = vec![];
 
-        let mut sharable_queue = VisitQueue::new();
+        let sharable_queue = VisitQueue::new();
 
         sharable_queue.push_visit_blocking(path);
 
-        let mut work_vec = vec![];
+        let mut spawned_tasks = vec![];
 
         for _ in 0..initial_count {
-            let mut worker = WalkerWorker::new(handler.clone(), sharable_queue.clone());
+            let mut worker = WalkerWorker::new(sharable_queue.clone(), work_handler.clone());
 
             println!("Starting work.");
-            work_vec.push(async_std::task::spawn(async move {
+
+            spawned_tasks.push(async_std::task::spawn(async move {
                 worker.start_working().await
             }));
         }
 
         println!("Waiting for work to finish.");
-        for work in work_vec {
-            work.await;
+        for task in spawned_tasks {
+            task.await;
         }
 
         println!("Done working.");
