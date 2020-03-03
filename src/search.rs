@@ -114,10 +114,9 @@ where
     /// and send the results to the given `Printer`.
     /// `Ok` if every target is an available file or directory (or stdin).
     /// `Err` with a list of failed paths if any of the paths are invalid.
-    pub(crate) async fn search(&self, targets: &'_ [Target]) -> Result<stats::ReadStats> {where M: Matcher,
-        P: PrinterSender,
-        R: Read,;
-
+    pub(crate) async fn search(&self, targets: &'_ [Target]) -> Result<stats::ReadStats> {
+        let mut agg_stats = stats::ReadStats::default();
+        let mut error_paths = vec![];
         let buf_pool = Arc::new(BufferPool::new());
 
         for target in targets {
@@ -136,7 +135,8 @@ where
                 }
                 Target::Path(path) => {
                     if path.is_file().await {
-                        Searcher::search_file(path, matcher, printer, buf_pool.clone()).await
+                        let line_buffer = AsyncLineBufferBuilder::new().build();
+                        Searcher::search_file(path, matcher, printer, line_buffer).await
                     } else if path.is_dir().await {
                         Searcher::search_directory(path, matcher, printer, buf_pool.clone()).await
                     } else {
@@ -230,7 +230,7 @@ where
 
         let rdr = BufReader::new(file);
 
-        let mut line_buf_rdr = AsyncLineBufferReader::new(line_buffer, line_buf).line_nums(true);
+        let mut line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buffer).line_nums(true);
 
         let target_name = Some(path.to_string_lossy().to_string());
 
@@ -331,7 +331,7 @@ fn check_utf8(bytes: &[u8]) -> bool {
 struct SearchHandler<M, P, R>
 where M: Matcher,
     P: PrinterSender,
-    R: Read,
+    R: Read + std::marker::Unpin,
 {
     matcher: M,
     printer: P,
@@ -341,7 +341,7 @@ where M: Matcher,
 impl<M, P, R> WorkHandler for SearchHandler<M, P, R>
 where M: Matcher,
     P: PrinterSender,
-    R: Read,
+    R: Read + std::marker::Unpin + Clone,
 {
     fn handle_work(&self, work: async_std::path::PathBuf) {
         let matcher = self.matcher.clone();

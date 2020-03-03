@@ -67,7 +67,7 @@ impl AsyncLineBufferBuilder {
 /// initialize this with at least as much pre-allocated space
 /// as the file size (for reasonably sized files)
 /// so only one read from the file will be necessary.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct AsyncLineBuffer {
     /// The internal buffer.
     buffer: Vec<u8>,
@@ -230,7 +230,7 @@ impl AsyncLineBuffer {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct AsyncLineBufferReader<R>
 where
     R: async_std::io::Read + std::marker::Unpin,
