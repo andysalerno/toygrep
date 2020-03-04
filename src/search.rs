@@ -81,8 +81,8 @@ where
 
 impl<M, P> SearcherBuilder<M, P>
 where
-    M: Matcher + 'static,
-    P: PrinterSender + 'static,
+    M: Matcher + std::marker::Sync + 'static,
+    P: PrinterSender + std::marker::Sync + 'static,
 {
     pub(crate) fn new(matcher: M, printer: P) -> SearcherBuilder<M, P> {
         Self { matcher, printer }
@@ -104,8 +104,8 @@ where
 
 impl<M, P> Searcher<M, P>
 where
-    M: Matcher + 'static,
-    P: PrinterSender + 'static,
+    M: Matcher + std::marker::Sync + 'static,
+    P: PrinterSender + std::marker::Sync + 'static,
 {
     fn new(matcher: M, printer: P) -> Self {
         Self { matcher, printer }
@@ -132,12 +132,12 @@ where
                     let mut line_rdr =
                         AsyncLineBufferReader::new(file_rdr, line_buf).line_nums(false);
 
-                    Searcher::search_via_reader(matcher, &mut line_rdr, None, printer.clone()).await
+                    Searcher::search_via_reader(&matcher, &mut line_rdr, None, &printer.clone()).await
                 }
                 Target::Path(path) => {
                     if path.is_file().await {
                         let line_buffer = AsyncLineBufferBuilder::new().build();
-                        Searcher::search_file(path, matcher, printer, line_buffer).await
+                        Searcher::search_file(path, &matcher, &printer, line_buffer).await
                     } else if path.is_dir().await {
                         let buffer = buf_pool.acquire().await;
                         Searcher::search_directory(path, matcher, printer, buffer).await
@@ -161,10 +161,10 @@ where
     }
 
     async fn search_via_reader<R>(
-        matcher: M,
+        matcher: &M,
         buffer: &mut AsyncLineBufferReader<R>,
         name: Option<String>,
-        printer: P,
+        printer: &P,
     ) -> stats::ReadStats
     where
         R: Read + std::marker::Unpin,
@@ -216,9 +216,9 @@ where
 
     async fn search_file(
         path: &Path,
-        matcher: M,
-        printer: P,
-        line_buffer: AsyncLineBuffer,
+        matcher: &M,
+        printer: &P,
+        line_buffer: &mut AsyncLineBuffer,
     ) -> stats::ReadStats {
         let file = {
             let f = File::open(path).await;
@@ -320,9 +320,7 @@ where
         use crate::walker_worker::WorkerPool;
 
         let worker_pool = WorkerPool::spawn(directory_path.into(), 8, |path| {
-            let printer = printer;
-            let buffer = buffer;
-            Searcher::search_file(&path, matcher, printer, buffer);
+            Searcher::search_file(&path, &matcher, &printer, &mut buffer);
             println!("I'm the closure, doing work.");
         })
         .await;

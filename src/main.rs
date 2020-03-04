@@ -71,21 +71,9 @@ async fn main() {
     // the results sent to it).
     let status = {
         // TODO: consider using dyn instead of branching
-        if user_input.synchronous_printer {
-            let printer = print_builder.build_blocking();
-            let searcher = SearcherBuilder::new(matcher, printer).build();
-            searcher.search(&user_input.targets).await
-        } else {
-            let (printer, join_handle) = print_builder.spawn_threaded();
-            let searcher = SearcherBuilder::new(matcher, printer).build();
-            let result = searcher.search(&user_input.targets).await;
-
-            drop(searcher);
-
-            join_handle.join().expect("Couldn't join printing thread.");
-
-            result
-        }
+        let printer = print_builder.build_blocking();
+        let searcher = SearcherBuilder::new(matcher, printer).build();
+        searcher.search(&user_input.targets).await
     };
 
     time_log.log_search_duration();
