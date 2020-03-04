@@ -319,7 +319,7 @@ where
 
         let handler = SearchHandler::new(matcher, printer, buffer);
 
-        let worker_pool = WorkerPool::spawn(handler, directory_path.into(), 8).await;
+        let worker_pool = WorkerPool::spawn(handler, directory_path.into(), 4).await;
 
         stats::ReadStats::default()
     }
@@ -358,20 +358,21 @@ where M: Matcher + Sync + 'static,
     P: PrinterSender + Sync + 'static,
 {
     async fn handle_work(&mut self, path: async_std::path::PathBuf) {
-        self.buffer.refresh();
+        println!("Visiting path: {}", path.to_string_lossy());
+        // self.buffer.refresh();
 
-        let file = File::open(&path).await.unwrap();
+        // let file = File::open(&path).await.unwrap();
 
-        let rdr = BufReader::new(file);
+        // let rdr = BufReader::new(file);
 
-        let mut tmp_buf = AsyncLineBufferBuilder::new().build();
-        std::mem::swap(&mut self.buffer, &mut tmp_buf);
+        // let mut tmp_buf = AsyncLineBufferBuilder::new().build();
+        // std::mem::swap(&mut self.buffer, &mut tmp_buf);
 
-        let mut line_buf_rdr = AsyncLineBufferReader::new(rdr, tmp_buf).line_nums(true);
+        // let mut line_buf_rdr = AsyncLineBufferReader::new(rdr, tmp_buf).line_nums(true);
 
-        let target_name = Some(path.to_string_lossy().to_string());
+        // let target_name = Some(path.to_string_lossy().to_string());
 
-        let search_result =
-            Searcher::search_via_reader(&self.matcher, &mut line_buf_rdr, target_name, &self.printer).await;
+        // let search_result =
+        //     Searcher::search_via_reader(&self.matcher, &mut line_buf_rdr, target_name, &self.printer).await;
     }
 }

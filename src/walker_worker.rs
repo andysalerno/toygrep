@@ -1,10 +1,10 @@
 use async_std::path::PathBuf;
 use async_std::stream::StreamExt;
-use crossbeam_channel::unbounded;
 use async_trait::async_trait;
+use crossbeam_channel::unbounded;
 use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 /// A trait describing a work handler,
 /// which knows how to work given a pathbuf that needs working.
@@ -29,8 +29,8 @@ impl<T> MessageQueue<T> {
 
     /// Push a new visit onto the queue, possibly
     /// blocking the thread until the push succeeds.
-    fn push_message_blocking(&self, visit: T) {
-        self.sender.send(visit).ok();
+    fn push_message_blocking(&self, message: WorkMessage<T>) {
+        self.sender.send(message).ok();
     }
 
     /// Block until
@@ -49,13 +49,17 @@ enum WorkMessage<T> {
 /// perform some work on the visited path,
 /// and possibly push yet another path into the VisitQueue.
 pub(crate) struct WalkerWorker<T: WorkHandler> {
-    visit_queue: VisitQueue<PathBuf>,
+    visit_queue: MessageQueue<PathBuf>,
     work_handler: T,
     work_pending: Arc<AtomicUsize>,
 }
 
 impl<T: WorkHandler> WalkerWorker<T> {
-    fn new(work_handler: T, visit_queue: VisitQueue<PathBuf>, work_pending: Arc<AtomicUsize>) -> Self {
+    fn new(
+        work_handler: T,
+        visit_queue: MessageQueue<PathBuf>,
+        work_pending: Arc<AtomicUsize>,
+    ) -> Self {
         Self {
             visit_queue,
             work_handler,
@@ -64,23 +68,38 @@ impl<T: WorkHandler> WalkerWorker<T> {
     }
 
     async fn start_working(&mut self) {
-        while let Some(path) = self.visit_queue.pop_visit_blocking() {
-            if path.is_file().await {
-                self.work_handler.handle_work(path).await;
-            } else if path.is_dir().await {
-                let mut dir_stream = path.read_dir().await.unwrap();
+        while let Some(message) = self.visit_queue.pop_message_blocking() {
+            match message {
+                WorkMessage::Visit(path) => {
+                    if path.is_file().await {
+                        self.work_handler.handle_work(path).await;
+                    } else if path.is_dir().await {
+                        let mut dir_stream = path.read_dir().await.unwrap();
 
-                let mut work_added = 0;
+                        let mut work_added = 0;
 
-                while let Some(child) = dir_stream.next().await {
-                    self.visit_queue.push_visit_blocking(child.unwrap().path());
-                    work_added += 1;
+                        while let Some(child) = dir_stream.next().await {
+                            self.visit_queue
+                                .push_message_blocking(WorkMessage::Visit(child.unwrap().path()));
+                            work_added += 1;
+                        }
+
+                        // self.work_pending.fetch_add(work_added, Ordering::SeqCst);
+                    }
+
+                    // let prev_val = self.work_pending.fetch_sub(1, Ordering::SeqCst);
+
+                    // if prev_val == 1 {
+                    //     // was 1, we subtracted to 0, so now it is 0
+                    //     self.visit_queue.push_message_blocking(WorkMessage::Quit);
+                    //     return;
+                    // }
                 }
-
-                self.work_pending.fetch_add(work_added, Ordering::SeqCst);
+                WorkMessage::Quit => {
+                    // self.visit_queue.push_message_blocking(WorkMessage::Quit);
+                    // return;
+                }
             }
-
-            self.work_pending.fetch_sub(1, Ordering::SeqCst);
 
             // if work_pending is 0, push the Quit message
         }
@@ -97,16 +116,20 @@ impl<T: WorkHandler + Send + Sync + 'static> WorkerPool<T> {
 
         let mut workers = vec![];
 
-        let mut sharable_queue = VisitQueue::new();
+        let mut sharable_queue = MessageQueue::new();
 
-        sharable_queue.push_visit_blocking(path);
+        sharable_queue.push_message_blocking(WorkMessage::Visit(path));
 
         let mut work_vec = vec![];
 
         let work_pending = Arc::new(AtomicUsize::new(1));
 
         for _ in 0..initial_count {
-            let mut worker = WalkerWorker::new(handler.clone(), sharable_queue.clone(), work_pending.clone());
+            let mut worker = WalkerWorker::new(
+                handler.clone(),
+                sharable_queue.clone(),
+                work_pending.clone(),
+            );
 
             work_vec.push(async_std::task::spawn(async move {
                 worker.start_working().await
