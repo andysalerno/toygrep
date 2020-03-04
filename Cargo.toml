@@ -16,6 +16,7 @@ peeking_take_while = "0.1.2"
 atty = "0.2.14"
 termcolor = "1.1.0"
 crossbeam-channel = "0.4"
+async-trait = "0.1.24"
 
 [dependencies.async-std]
 version = "1.5.0"

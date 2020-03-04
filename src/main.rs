@@ -65,6 +65,7 @@ async fn main() {
             .print_immediately(print_immediately)
     };
 
+
     // Perform the search, walking the filesystem, detecting matches,
     // and sending them to the printer (note, even after `search` has
     // terminated, the printer thread is likely still processing
