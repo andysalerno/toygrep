@@ -38,6 +38,10 @@ impl<T> MessageQueue<T> {
     fn pop_message_blocking(&self) -> Option<WorkMessage<T>> {
         self.receiver.recv().ok()
     }
+
+    fn try_pop_message(&self) -> Option<WorkMessage<T>> {
+        self.receiver.try_recv().ok()
+    }
 }
 
 enum WorkMessage<T> {
@@ -68,8 +72,15 @@ impl<T: WorkHandler> WalkerWorker<T> {
     }
 
     async fn start_working(&mut self) {
-        while let Some(message) = self.visit_queue.pop_message_blocking() {
-            match message {
+        loop {
+            let message = self.visit_queue.try_pop_message();
+
+            if message.is_none() {
+                async_std::task::yield_now().await;
+                continue;
+            }
+
+            match message.unwrap() {
                 WorkMessage::Visit(path) => {
                     if path.is_file().await {
                         self.work_handler.handle_work(path).await;
