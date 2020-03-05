@@ -118,7 +118,6 @@ where
     pub(crate) async fn search(&self, targets: &'_ [Target]) -> Result<stats::ReadStats> {
         let mut agg_stats = stats::ReadStats::default();
         let mut error_paths = vec![];
-        let buf_pool = Arc::new(BufferPool::new());
 
         for target in targets {
             let matcher = self.matcher.clone();
@@ -135,12 +134,12 @@ where
                     Searcher::search_via_reader(&matcher, &mut line_rdr, None, &printer).await
                 }
                 Target::Path(path) => {
+                    let line_buffer = AsyncLineBufferBuilder::new().build();
+
                     if path.is_file().await {
-                        let line_buffer = AsyncLineBufferBuilder::new().build();
                         Searcher::search_file(path, matcher, printer, line_buffer).await
                     } else if path.is_dir().await {
-                        let buffer = buf_pool.acquire().await;
-                        Searcher::search_directory(path, matcher, printer, buffer).await
+                        Searcher::search_directory(path, matcher, printer, line_buffer).await
                     } else {
                         error_paths.push(format!("{}", path.display()));
                         stats::ReadStats::default()
@@ -150,8 +149,6 @@ where
 
             agg_stats.fold_in(&stats);
         }
-
-        agg_stats.buffers_created = buf_pool.pool_size().await;
 
         if error_paths.is_empty() {
             Ok(agg_stats)
