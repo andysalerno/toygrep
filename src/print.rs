@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 use crate::matcher::Matcher;
 use crate::time_log::TimeLog;
 use printer::PrettyPrinter;
-use std::sync::mpsc;
+use crossbeam_channel::unbounded;
 use std::thread;
 
 /// A trait describing the ability to "send" a message to a printer.
@@ -98,7 +98,7 @@ impl<M: Matcher + Send + Sync + 'static> Printer<M> {
     }
 
     pub(crate) fn spawn_threaded(self) -> (impl PrinterSender, std::thread::JoinHandle<TimeLog>) {
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = unbounded();
         let sender = crate::print::threaded_printer::Sender::new(sender);
         let mut printer =
             crate::print::threaded_printer::Printer::new(self.matcher, receiver, self.config);

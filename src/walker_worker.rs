@@ -82,7 +82,8 @@ impl<T: WorkHandler> WalkerWorker<T> {
                             new_work.push(WorkMessage::Visit(child.unwrap().path()));
                         }
 
-                        self.work_pending.fetch_add(new_work.len(), Ordering::SeqCst);
+                        self.work_pending
+                            .fetch_add(new_work.len(), Ordering::SeqCst);
 
                         new_work.into_iter().for_each(|w| {
                             self.visit_queue.push_message_blocking(w);
@@ -107,16 +108,14 @@ impl<T: WorkHandler> WalkerWorker<T> {
 }
 
 pub(crate) struct WorkerPool<T: WorkHandler> {
-    workers: Vec<WalkerWorker<T>>,
+    _workers: Vec<WalkerWorker<T>>,
 }
 
 impl<T: WorkHandler + Send + Sync + 'static> WorkerPool<T> {
-    pub(crate) async fn spawn(handler: T, path: PathBuf, initial_count: usize) -> Self {
+    pub(crate) async fn spawn(handler: T, path: PathBuf, initial_count: usize) {
         assert!(initial_count > 0);
 
-        let mut workers = vec![];
-
-        let mut sharable_queue = MessageQueue::new();
+        let sharable_queue = MessageQueue::new();
 
         sharable_queue.push_message_blocking(WorkMessage::Visit(path));
 
@@ -136,10 +135,10 @@ impl<T: WorkHandler + Send + Sync + 'static> WorkerPool<T> {
             }));
         }
 
+        drop(sharable_queue);
+
         for work in work_vec {
             work.await;
         }
-
-        Self { workers }
     }
 }

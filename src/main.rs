@@ -65,16 +65,27 @@ async fn main() {
             .print_immediately(print_immediately)
     };
 
-
     // Perform the search, walking the filesystem, detecting matches,
     // and sending them to the printer (note, even after `search` has
     // terminated, the printer thread is likely still processing
     // the results sent to it).
     let status = {
         // TODO: consider using dyn instead of branching
-        let printer = print_builder.build_blocking();
-        let searcher = SearcherBuilder::new(matcher, printer).build();
-        searcher.search(&user_input.targets).await
+        if user_input.synchronous_printer {
+            let printer = print_builder.build_blocking();
+            let searcher = SearcherBuilder::new(matcher, printer).build();
+            searcher.search(&user_input.targets).await
+        } else {
+            let (printer, join_handle) = print_builder.spawn_threaded();
+            let searcher = SearcherBuilder::new(matcher, printer).build();
+            let result = searcher.search(&user_input.targets).await;
+
+            drop(searcher);
+
+            join_handle.join().expect("Couldn't join printing thread.");
+
+            result
+        }
     };
 
     time_log.log_search_duration();
