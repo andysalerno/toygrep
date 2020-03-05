@@ -364,7 +364,7 @@ where
 
         let rdr = BufReader::new(file);
 
-        let mut tmp_buf = AsyncLineBufferBuilder::new().build();
+        let mut tmp_buf = AsyncLineBufferBuilder::empty().build();
         std::mem::swap(&mut self.buffer, &mut tmp_buf);
 
         let mut line_buf_rdr = AsyncLineBufferReader::new(rdr, tmp_buf).line_nums(true);

@@ -36,6 +36,13 @@ impl AsyncLineBufferBuilder {
         }
     }
 
+    pub(crate) fn empty() -> Self { 
+        Self {
+            line_break_byte: b'\n',
+            start_size_bytes: 0,
+        }
+    }
+
     pub(crate) fn with_line_break_byte(mut self, line_break_byte: u8) -> Self {
         self.line_break_byte = line_break_byte;
         self
