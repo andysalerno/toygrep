@@ -76,32 +76,32 @@ impl<T: WorkHandler> WalkerWorker<T> {
                     } else if path.is_dir().await {
                         let mut dir_stream = path.read_dir().await.unwrap();
 
-                        let mut work_added = 0;
+                        let mut new_work = vec![];
 
                         while let Some(child) = dir_stream.next().await {
-                            self.visit_queue
-                                .push_message_blocking(WorkMessage::Visit(child.unwrap().path()));
-                            work_added += 1;
+                            new_work.push(WorkMessage::Visit(child.unwrap().path()));
                         }
 
-                        // self.work_pending.fetch_add(work_added, Ordering::SeqCst);
+                        self.work_pending.fetch_add(new_work.len(), Ordering::SeqCst);
+
+                        new_work.into_iter().for_each(|w| {
+                            self.visit_queue.push_message_blocking(w);
+                        });
                     }
 
-                    // let prev_val = self.work_pending.fetch_sub(1, Ordering::SeqCst);
+                    let prev_val = self.work_pending.fetch_sub(1, Ordering::SeqCst);
 
-                    // if prev_val == 1 {
-                    //     // was 1, we subtracted to 0, so now it is 0
-                    //     self.visit_queue.push_message_blocking(WorkMessage::Quit);
-                    //     return;
-                    // }
+                    if prev_val == 1 {
+                        // was 1, we subtracted to 0, so now it is 0
+                        self.visit_queue.push_message_blocking(WorkMessage::Quit);
+                        return;
+                    }
                 }
                 WorkMessage::Quit => {
-                    // self.visit_queue.push_message_blocking(WorkMessage::Quit);
-                    // return;
+                    self.visit_queue.push_message_blocking(WorkMessage::Quit);
+                    return;
                 }
             }
-
-            // if work_pending is 0, push the Quit message
         }
     }
 }
