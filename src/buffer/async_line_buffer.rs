@@ -30,7 +30,6 @@ pub(crate) struct AsyncLineBufferBuilder {
 
 impl AsyncLineBufferBuilder {
     pub(crate) fn new() -> Self {
-        eprintln!("New buffer created.");
         Self {
             line_break_byte: b'\n',
             start_size_bytes: 8 * (1 << 10),
