@@ -80,6 +80,9 @@ impl<T: WorkHandler> WalkerWorker<T> {
                 continue;
             }
 
+            // eprintln!("Sendqueue count: {}", self.visit_queue.sender.len());
+            // eprintln!("Receivequeue count: {}", self.visit_queue.receiver.len());
+
             match message.unwrap() {
                 WorkMessage::Visit(path) => {
                     if path.is_file().await {
@@ -87,11 +90,31 @@ impl<T: WorkHandler> WalkerWorker<T> {
                     } else if path.is_dir().await {
                         let mut dir_stream = path.read_dir().await.unwrap();
 
+                        let mut dirs = vec![];
+                        let mut files = vec![];
+
                         while let Some(child) = dir_stream.next().await {
-                            self.work_pending.fetch_add(1, Ordering::SeqCst);
-                            let message = WorkMessage::Visit(child.unwrap().path());
-                            self.visit_queue.push_message_blocking(message);
+                            let path = child.unwrap().path();
+
+                            if path.is_dir().await {
+                                dirs.push(path);
+                            }
+                            else {
+                                files.push(path);
+                            }
                         }
+
+                        self.work_pending.fetch_add(dirs.len() + files.len(), Ordering::SeqCst);
+
+                        dirs.into_iter().for_each(|path| {
+                            let message = WorkMessage::Visit(path);
+                            self.visit_queue.push_message_blocking(message);
+                        });
+
+                        files.into_iter().for_each(|path| {
+                            let message = WorkMessage::Visit(path);
+                            self.visit_queue.push_message_blocking(message);
+                        });
                     }
 
                     let prev_val = self.work_pending.fetch_sub(1, Ordering::SeqCst);

@@ -313,7 +313,7 @@ where
 
         let handler = SearchHandler::new(matcher, printer, buffer);
 
-        WorkerPool::spawn(handler, directory_path.into(), 8).await;
+        WorkerPool::spawn(handler, directory_path.into(), 12).await;
 
         stats::ReadStats::default()
     }
