@@ -87,18 +87,11 @@ impl<T: WorkHandler> WalkerWorker<T> {
                     } else if path.is_dir().await {
                         let mut dir_stream = path.read_dir().await.unwrap();
 
-                        let mut new_work = vec![];
-
                         while let Some(child) = dir_stream.next().await {
-                            new_work.push(WorkMessage::Visit(child.unwrap().path()));
+                            self.work_pending.fetch_add(1, Ordering::SeqCst);
+                            let message = WorkMessage::Visit(child.unwrap().path());
+                            self.visit_queue.push_message_blocking(message);
                         }
-
-                        self.work_pending
-                            .fetch_add(new_work.len(), Ordering::SeqCst);
-
-                        new_work.into_iter().for_each(|w| {
-                            self.visit_queue.push_message_blocking(w);
-                        });
                     }
 
                     let prev_val = self.work_pending.fetch_sub(1, Ordering::SeqCst);

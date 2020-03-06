@@ -5,8 +5,8 @@ mod threaded_printer;
 use crate::error::{Error, Result};
 use crate::matcher::Matcher;
 use crate::time_log::TimeLog;
-use printer::PrettyPrinter;
 use crossbeam_channel::unbounded;
+use printer::PrettyPrinter;
 use std::thread;
 
 /// A trait describing the ability to "send" a message to a printer.
