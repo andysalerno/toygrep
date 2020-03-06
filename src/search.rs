@@ -313,7 +313,7 @@ where
 
         let handler = SearchHandler::new(matcher, printer, buffer);
 
-        WorkerPool::spawn(handler, directory_path.into(), 12).await;
+        WorkerPool::spawn(handler, directory_path.into(), 8).await;
 
         stats::ReadStats::default()
     }
@@ -374,5 +374,7 @@ where
         let mut recycled_buffer = line_buf_rdr.take_line_buffer();
 
         std::mem::swap(&mut self.buffer, &mut recycled_buffer);
+
+        async_std::task::yield_now().await;
     }
 }
