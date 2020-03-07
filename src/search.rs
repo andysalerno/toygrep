@@ -269,7 +269,7 @@ where
     ) -> stats::ReadStats {
         let crawler = Crawler::new(matcher, printer, buf_pool);
 
-        crawler.handle_dir(directory_path.into());
+        crawler.handle_dir(directory_path.into()).await;
 
         stats::ReadStats::default()
 
@@ -378,12 +378,14 @@ where
             .await;
     }
 
-    fn handle_dir(&self, path: PathBuf) -> Pin<Box<dyn Future<Output = ()>>> {
+    fn handle_dir(&self, path: PathBuf) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let printer = self.printer.clone();
         let matcher = self.matcher.clone();
         let buf_pool = self.buf_pool.clone();
 
-        Box::pin(async move {
+        let mut tasks = vec![];
+
+        let result = Box::pin(async move {
             let mut dir_children = {
                 if let Ok(children) = fs::read_dir(path).await {
                     children
@@ -400,15 +402,25 @@ where
                 let buf_pool = buf_pool.clone();
 
                 if dir_child.is_file().await {
-                    async_std::task::spawn(async move {
+                    tasks.push(async_std::task::spawn(async move {
                         let crawler = Crawler::new(matcher, printer, buf_pool);
                         crawler.handle_file(&dir_child).await;
-                    });
+                    }));
                 } else if dir_child.is_dir().await {
-                    let crawler = Crawler::new(matcher, printer, buf_pool);
-                    crawler.handle_dir(dir_child).await;
+                    tasks.push(async_std::task::spawn(async move {
+                        // let crawler = Crawler::new(matcher, printer, buf_pool);
+                        // crawler.handle_file(&dir_child).await;
+                        let crawler = Crawler::new(matcher, printer, buf_pool);
+                        crawler.handle_dir(dir_child).await;
+                    }));
                 }
             }
-        })
+
+            for task in tasks {
+                task.await;
+            }
+        });
+
+        return result;
     }
 }
