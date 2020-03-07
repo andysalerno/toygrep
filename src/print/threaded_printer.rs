@@ -1,17 +1,17 @@
 use super::{Config, PrettyPrinter, PrintMessage, PrinterSender};
 use crate::matcher::Matcher;
 use crate::time_log::TimeLog;
-use std::sync::mpsc;
+use crossbeam_channel::{Receiver as ChannelReceiver, Sender as ChannelSender};
 use std::time::Instant;
 use termcolor::{ColorChoice, StandardStream};
 
 #[derive(Clone)]
 pub(crate) struct Sender {
-    sender: mpsc::Sender<PrintMessage>,
+    sender: ChannelSender<PrintMessage>,
 }
 
 impl Sender {
-    pub(super) fn new(sender: mpsc::Sender<PrintMessage>) -> Self {
+    pub(super) fn new(sender: ChannelSender<PrintMessage>) -> Self {
         Self { sender }
     }
 }
@@ -25,14 +25,14 @@ impl PrinterSender for Sender {
 /// A simple printer that can be spawned on a separate thread,
 /// and receive messages to print from the `Sender`.
 pub(super) struct Printer<M: Matcher> {
-    receiver: mpsc::Receiver<PrintMessage>,
+    receiver: ChannelReceiver<PrintMessage>,
     printer: PrettyPrinter<M>,
 }
 
-impl<M: Matcher + 'static> Printer<M> {
+impl<M: Matcher> Printer<M> {
     pub(super) fn new(
         matcher: Option<M>,
-        receiver: mpsc::Receiver<PrintMessage>,
+        receiver: ChannelReceiver<PrintMessage>,
         config: Config,
     ) -> Self {
         Self {

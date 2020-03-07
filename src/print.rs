@@ -5,8 +5,8 @@ mod threaded_printer;
 use crate::error::{Error, Result};
 use crate::matcher::Matcher;
 use crate::time_log::TimeLog;
+use crossbeam_channel::unbounded;
 use printer::PrettyPrinter;
-use std::sync::mpsc;
 use std::thread;
 
 /// A trait describing the ability to "send" a message to a printer.
@@ -61,12 +61,12 @@ struct Config {
 
 /// A builder for a printer sender, which may be either blocking
 /// or non-blocking (threaded).
-pub(crate) struct Printer<M: Matcher + Send + Sync> {
+pub(crate) struct Printer<M: Matcher> {
     config: Config,
     matcher: Option<M>,
 }
 
-impl<M: Matcher + Send + Sync + 'static> Printer<M> {
+impl<M: Matcher + Sync + 'static> Printer<M> {
     pub(crate) fn new() -> Self {
         Self {
             config: Config {
@@ -98,7 +98,7 @@ impl<M: Matcher + Send + Sync + 'static> Printer<M> {
     }
 
     pub(crate) fn spawn_threaded(self) -> (impl PrinterSender, std::thread::JoinHandle<TimeLog>) {
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = unbounded();
         let sender = crate::print::threaded_printer::Sender::new(sender);
         let mut printer =
             crate::print::threaded_printer::Printer::new(self.matcher, receiver, self.config);
