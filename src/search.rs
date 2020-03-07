@@ -236,7 +236,9 @@ where
 
         let target_name = Some(path.to_string_lossy().to_string());
 
-        let search_result = Searcher::search_via_reader(matcher, &mut line_buf_rdr, target_name, printer).await;
+        let search_result = async_std::task::block_on(async {
+            Searcher::search_via_reader(matcher, &mut line_buf_rdr, target_name, printer).await
+        });
 
         buf_pool
             .return_to_pool(line_buf_rdr.take_line_buffer())
