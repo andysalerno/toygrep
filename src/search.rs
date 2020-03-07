@@ -6,10 +6,11 @@ use crate::print::{PrintMessage, PrintableResult, PrinterSender};
 use crate::target::Target;
 use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
-use async_std::path::Path;
+use async_std::path::{Path, PathBuf};
 use async_std::prelude::*;
 use async_std::sync::Arc;
 use std::collections::VecDeque;
+use std::pin::Pin;
 use std::time::Instant;
 
 // How many bytes must we check to be reasonably sure the input isn't binary?
@@ -79,8 +80,8 @@ where
 
 impl<M, P> SearcherBuilder<M, P>
 where
-    M: Matcher + 'static,
-    P: PrinterSender + 'static,
+    M: Matcher + Sync + 'static,
+    P: PrinterSender + Sync + 'static,
 {
     pub(crate) fn new(matcher: M, printer: P) -> SearcherBuilder<M, P> {
         Self { matcher, printer }
@@ -102,8 +103,8 @@ where
 
 impl<M, P> Searcher<M, P>
 where
-    M: Matcher + 'static,
-    P: PrinterSender + 'static,
+    M: Matcher + Sync + 'static,
+    P: PrinterSender + Sync + 'static,
 {
     fn new(matcher: M, printer: P) -> Self {
         Self { matcher, printer }
@@ -132,7 +133,7 @@ where
                     let mut line_rdr =
                         AsyncLineBufferReader::new(file_rdr, line_buf).line_nums(false);
 
-                    Searcher::search_via_reader(matcher, &mut line_rdr, None, printer.clone()).await
+                    Searcher::search_via_reader(&matcher, &mut line_rdr, None, &printer).await
                 }
                 Target::Path(path) => {
                     if path.is_file().await {
@@ -159,10 +160,10 @@ where
     }
 
     async fn search_via_reader<R>(
-        matcher: M,
+        matcher: &M,
         buffer: &mut AsyncLineBufferReader<R>,
         name: Option<String>,
-        printer: P,
+        printer: &P,
     ) -> stats::ReadStats
     where
         R: Read + std::marker::Unpin,
@@ -203,7 +204,7 @@ where
 
         printer.send(PrintMessage::EndOfReading { target_name: name });
 
-        drop(printer);
+        // drop(printer);
 
         stats.non_utf8_bytes_checked = binary_bytes_checked;
         stats.reader_search_dur = start.elapsed();
@@ -236,7 +237,8 @@ where
 
         let target_name = Some(path.to_string_lossy().to_string());
 
-        let search_result = Searcher::search_via_reader(matcher, &mut line_buf_rdr, target_name, printer).await;
+        let search_result =
+            Searcher::search_via_reader(&matcher, &mut line_buf_rdr, target_name, &printer).await;
 
         buf_pool
             .return_to_pool(line_buf_rdr.take_line_buffer())
@@ -248,15 +250,15 @@ where
     /// Given a directory path, descend down the whole tree,
     /// performing a search on every file found,
     /// and recursively visiting descendant directories.
-    /// 
+    ///
     /// Note: this is a major simplification compared to how
     /// Ripgrep works. I believe it is possibly the biggest contributor
     /// to why Toygrep is much slower than Ripgrep on some workloads.
-    /// 
+    ///
     /// Toygrep's current appraoch is this (as seen in the code below):
     /// An outermost loop, on one thread, descends through every directory,
     /// and fires off an async task whenever a file is encountered.
-    /// 
+    ///
     /// In comparison, Ripgrip will spawn some number of workers, and they share
     /// a global queue of directories to visit, and descend independently of any outer loop.
     async fn search_directory(
@@ -265,56 +267,148 @@ where
         printer: P,
         buf_pool: Arc<BufferPool>,
     ) -> stats::ReadStats {
-        let start = Instant::now();
+        let crawler = Crawler::new(matcher, printer, buf_pool);
 
-        let mut agg_stats = stats::ReadStats::default();
+        crawler.handle_dir(directory_path.into());
 
-        let mut dir_walk = VecDeque::new();
+        stats::ReadStats::default()
 
-        dir_walk.push_back(directory_path.to_path_buf());
+        // let mut dir_walk = VecDeque::new();
 
-        let mut spawned_tasks = Vec::new();
+        // dir_walk.push_back(directory_path.to_path_buf());
 
-        while let Some(dir_path) = dir_walk.pop_front() {
+        // let mut spawned_tasks = Vec::new();
+
+        // while let Some(dir_path) = dir_walk.pop_front() {
+        //     let mut dir_children = {
+        //         if let Ok(children) = fs::read_dir(dir_path).await {
+        //             children
+        //         } else {
+        //             continue;
+        //         }
+        //     };
+
+        //     while let Some(dir_child) = dir_children.next().await {
+        //         let dir_child = dir_child.expect("Failed to make dir child.").path();
+
+        //         if dir_child.is_file().await {
+        //             let printer = printer.clone();
+        //             let matcher = matcher.clone();
+        //             let buf_pool = buf_pool.clone();
+
+        //             let task = async_std::task::spawn(async move {
+        //                 let dir_child_path: &Path = &dir_child;
+        //                 Searcher::search_file(dir_child_path, matcher, printer, buf_pool).await
+        //             });
+
+        //             spawned_tasks.push(task);
+        //         } else if dir_child.is_dir().await {
+        //             dir_walk.push_back(dir_child);
+        //         }
+        //     }
+        // }
+
+        // agg_stats.filesystem_walk_dur = start.elapsed();
+
+        // for task in spawned_tasks {
+        //     let read_stats = task.await;
+        //     agg_stats.fold_in(&read_stats);
+        // }
+
+        // agg_stats
+    }
+}
+
+fn check_utf8(bytes: &[u8]) -> bool {
+    std::str::from_utf8(bytes).is_ok()
+}
+
+struct Crawler<M, P>
+where
+    M: Matcher + 'static,
+    P: PrinterSender + 'static,
+{
+    buf_pool: Arc<BufferPool>,
+    matcher: M,
+    printer: P,
+}
+
+impl<M, P> Crawler<M, P>
+where
+    M: Matcher + Sync + 'static,
+    P: PrinterSender + Sync + 'static,
+{
+    fn new(matcher: M, printer: P, buf_pool: Arc<BufferPool>) -> Self {
+        Self {
+            matcher,
+            printer,
+            buf_pool,
+        }
+    }
+
+    async fn handle_file(&self, path: &Path) {
+        let file = {
+            let f = File::open(path).await;
+
+            if let Ok(f) = f {
+                f
+            } else {
+                return;
+            }
+        };
+
+        let rdr = BufReader::new(file);
+
+        let line_buf = self.buf_pool.acquire().await;
+
+        let mut line_buf_rdr = AsyncLineBufferReader::new(rdr, line_buf).line_nums(true);
+
+        let target_name = Some(path.to_string_lossy().to_string());
+
+        let _search_result = Searcher::search_via_reader(
+            &self.matcher,
+            &mut line_buf_rdr,
+            target_name,
+            &self.printer,
+        )
+        .await;
+
+        self.buf_pool
+            .return_to_pool(line_buf_rdr.take_line_buffer())
+            .await;
+    }
+
+    fn handle_dir(&self, path: PathBuf) -> Pin<Box<dyn Future<Output = ()>>> {
+        let printer = self.printer.clone();
+        let matcher = self.matcher.clone();
+        let buf_pool = self.buf_pool.clone();
+
+        Box::pin(async move {
             let mut dir_children = {
-                if let Ok(children) = fs::read_dir(dir_path).await {
+                if let Ok(children) = fs::read_dir(path).await {
                     children
                 } else {
-                    continue;
+                    return;
                 }
             };
 
             while let Some(dir_child) = dir_children.next().await {
                 let dir_child = dir_child.expect("Failed to make dir child.").path();
 
+                let printer = printer.clone();
+                let matcher = matcher.clone();
+                let buf_pool = buf_pool.clone();
+
                 if dir_child.is_file().await {
-                    let printer = printer.clone();
-                    let matcher = matcher.clone();
-                    let buf_pool = buf_pool.clone();
-
-                    let task = async_std::task::spawn(async move {
-                        let dir_child_path: &Path = &dir_child;
-                        Searcher::search_file(dir_child_path, matcher, printer, buf_pool).await
+                    async_std::task::spawn(async move {
+                        let crawler = Crawler::new(matcher, printer, buf_pool);
+                        crawler.handle_file(&dir_child).await;
                     });
-
-                    spawned_tasks.push(task);
                 } else if dir_child.is_dir().await {
-                    dir_walk.push_back(dir_child);
+                    let crawler = Crawler::new(matcher, printer, buf_pool);
+                    crawler.handle_dir(dir_child).await;
                 }
             }
-        }
-
-        agg_stats.filesystem_walk_dur = start.elapsed();
-
-        for task in spawned_tasks {
-            let read_stats = task.await;
-            agg_stats.fold_in(&read_stats);
-        }
-
-        agg_stats
+        })
     }
-}
-
-fn check_utf8(bytes: &[u8]) -> bool {
-    std::str::from_utf8(bytes).is_ok()
 }

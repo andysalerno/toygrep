@@ -63,8 +63,7 @@ impl<M: Matcher> PrettyPrinter<M> {
                 PrintMessage::EndOfReading { target_name } => {
                     if Some(&target_name) == self.currently_printing_file.as_ref() {
                         self.currently_printing_file = None;
-                    }
-                    else {
+                    } else {
                         let _ = self.print_target_results(&mut writer, &target_name);
                     }
                 }
