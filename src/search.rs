@@ -12,6 +12,8 @@ use async_std::sync::Arc;
 use std::collections::VecDeque;
 use std::time::Instant;
 
+use crate::walker::{Walker, WalkerMessage};
+
 // How many bytes must we check to be reasonably sure the input isn't binary?
 const BINARY_CHECK_LEN_BYTES: usize = 512;
 
@@ -94,7 +96,7 @@ where
 pub(crate) struct Searcher<M, P>
 where
     M: Matcher + 'static,
-    P: PrinterSender  + 'static,
+    P: PrinterSender + 'static,
 {
     matcher: M,
     printer: P,
@@ -267,53 +269,18 @@ where
         printer: P,
         buf_pool: Arc<BufferPool>,
     ) -> stats::ReadStats {
-        let start = Instant::now();
+        let (walker, receiver) = Walker::new(directory_path.into());
+        let handle = walker.spawn();
 
-        let mut agg_stats = stats::ReadStats::default();
-
-        let mut dir_walk = VecDeque::new();
-
-        dir_walk.push_back(directory_path.to_path_buf());
-
-        let mut spawned_tasks = Vec::new();
-
-        while let Some(dir_path) = dir_walk.pop_front() {
-            let mut dir_children = {
-                if let Ok(children) = fs::read_dir(dir_path).await {
-                    children
-                } else {
-                    continue;
-                }
-            };
-
-            while let Some(dir_child) = dir_children.next().await {
-                let dir_child = dir_child.expect("Failed to make dir child.").path();
-
-                if dir_child.is_file().await {
-                    let printer = printer.clone();
-                    let matcher = matcher.clone();
-                    let buf_pool = buf_pool.clone();
-
-                    let task = async_std::task::spawn(async move {
-                        let dir_child_path: &Path = &dir_child;
-                        Searcher::search_file(dir_child_path, matcher, printer, buf_pool).await
-                    });
-
-                    spawned_tasks.push(task);
-                } else if dir_child.is_dir().await {
-                    dir_walk.push_back(dir_child);
-                }
+        while let Some(msg) = receiver.recv().ok() {
+            match msg {
+                WalkerMessage::File(path) => println!("{}", path.to_string_lossy()),
             }
         }
 
-        agg_stats.filesystem_walk_dur = start.elapsed();
+        handle.join().unwrap();
 
-        for task in spawned_tasks {
-            let read_stats = task.await;
-            agg_stats.fold_in(&read_stats);
-        }
-
-        agg_stats
+        stats::ReadStats::default()
     }
 }
 
