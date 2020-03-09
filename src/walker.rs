@@ -49,8 +49,6 @@ impl Crawler {
         let sender = self.sender.clone();
         let path = self.root.clone();
 
-        println!("Crawling: {}", path.to_string_lossy());
-
         Box::pin(async move {
             let mut tasks = vec![];
 

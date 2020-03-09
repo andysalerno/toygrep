@@ -81,8 +81,8 @@ where
 
 impl<M, P> SearcherBuilder<M, P>
 where
-    M: Matcher,
-    P: PrinterSender,
+    M: Matcher + Sync,
+    P: PrinterSender + Sync,
 {
     pub(crate) fn new(matcher: M, printer: P) -> SearcherBuilder<M, P> {
         Self { matcher, printer }
@@ -104,8 +104,8 @@ where
 
 impl<M, P> Searcher<M, P>
 where
-    M: Matcher + 'static,
-    P: PrinterSender + 'static,
+    M: Matcher + Sync + 'static,
+    P: PrinterSender + Sync + 'static,
 {
     fn new(matcher: M, printer: P) -> Self {
         Self { matcher, printer }
@@ -238,9 +238,8 @@ where
 
         let target_name = Some(path.to_string_lossy().to_string());
 
-        let search_result = async_std::task::block_on(async {
-            Searcher::search_via_reader(matcher, &mut line_buf_rdr, target_name, printer).await
-        });
+        let search_result = 
+            Searcher::search_via_reader(matcher, &mut line_buf_rdr, target_name, printer).await;
 
         buf_pool
             .return_to_pool(line_buf_rdr.take_line_buffer())
@@ -273,8 +272,16 @@ where
         let handle = walker.spawn();
 
         while let Some(msg) = receiver.recv().ok() {
+            let matcher = matcher.clone();
+            let printer = printer.clone();
+            let buf_pool = buf_pool.clone();
+
             match msg {
-                WalkerMessage::File(path) => println!("{}", path.to_string_lossy()),
+                WalkerMessage::File(path) => {
+                    async_std::task::spawn(async move {
+                        Self::search_file(&path, matcher, printer, buf_pool).await;
+                    });
+                }
             }
         }
 
