@@ -271,6 +271,8 @@ where
         let (walker, receiver) = Walker::new(directory_path.into());
         let handle = walker.spawn();
 
+        let mut tasks = vec![];
+
         while let Some(msg) = receiver.recv().ok() {
             let matcher = matcher.clone();
             let printer = printer.clone();
@@ -278,11 +280,15 @@ where
 
             match msg {
                 WalkerMessage::File(path) => {
-                    async_std::task::spawn(async move {
+                    tasks.push(async_std::task::spawn(async move {
                         Self::search_file(&path, matcher, printer, buf_pool).await;
-                    });
+                    }));
                 }
             }
+        }
+
+        for task in tasks {
+            task.await;
         }
 
         handle.join().unwrap();
