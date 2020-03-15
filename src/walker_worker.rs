@@ -1,11 +1,7 @@
 use crate::walker::{WalkerMessage, WalkerReceiver};
 use async_std::path::PathBuf;
-use async_std::stream::StreamExt;
 use async_trait::async_trait;
-use crossbeam_channel::{unbounded, TryRecvError};
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use crossbeam_channel::TryRecvError;
 
 /// A trait describing a work handler,
 /// which knows how to work given a pathbuf that needs working.
@@ -20,15 +16,13 @@ pub(crate) trait WorkHandler: Clone {
 pub(crate) struct WalkerWorker<T: WorkHandler> {
     receiver: WalkerReceiver,
     work_handler: T,
-    work_pending: Arc<AtomicUsize>,
 }
 
 impl<T: WorkHandler> WalkerWorker<T> {
-    fn new(work_handler: T, receiver: WalkerReceiver, work_pending: Arc<AtomicUsize>) -> Self {
+    fn new(work_handler: T, receiver: WalkerReceiver) -> Self {
         Self {
             receiver,
             work_handler,
-            work_pending,
         }
     }
 
@@ -63,20 +57,13 @@ pub(crate) struct WorkerPool<T: WorkHandler> {
 }
 
 impl<T: WorkHandler + Send + Sync + 'static> WorkerPool<T> {
-    pub(crate) async fn spawn(
-        handler: T,
-        path: PathBuf,
-        rcv: WalkerReceiver,
-        workers_count: usize,
-    ) {
+    pub(crate) async fn spawn(handler: T, rcv: WalkerReceiver, workers_count: usize) {
         assert!(workers_count > 0);
 
         let mut work_vec = vec![];
 
-        let work_pending = Arc::new(AtomicUsize::new(1));
-
         for _ in 0..workers_count {
-            let mut worker = WalkerWorker::new(handler.clone(), rcv.clone(), work_pending.clone());
+            let mut worker = WalkerWorker::new(handler.clone(), rcv.clone());
 
             work_vec.push(async_std::task::spawn(async move {
                 worker.start_working().await

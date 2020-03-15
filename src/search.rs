@@ -235,75 +235,6 @@ where
         Searcher::search_via_reader(&matcher, &mut line_buf_rdr, target_name, &printer).await
     }
 
-    /// Given a directory path, descend down the whole tree,
-    /// performing a search on every file found,
-    /// and recursively visiting descendant directories.
-    ///
-    /// Note: this is a major simplification compared to how
-    /// Ripgrep works. I believe it is possibly the biggest contributor
-    /// to why Toygrep is much slower than Ripgrep on some workloads.
-    ///
-    /// Toygrep's current appraoch is this (as seen in the code below):
-    /// An outermost loop, on one thread, descends through every directory,
-    /// and fires off an async task whenever a file is encountered.
-    ///
-    /// In comparison, Ripgrip will spawn some number of workers, and they share
-    /// a global queue of directories to visit, and descend independently of any outer loop.
-    // async fn search_directory(
-    //     directory_path: &Path,
-    //     matcher: M,
-    //     printer: P,
-    //     buf_pool: Arc<BufferPool>,
-    // ) -> stats::ReadStats {
-    //     let start = Instant::now();
-
-    //     let mut agg_stats = stats::ReadStats::default();
-
-    //     let mut dir_walk = VecDeque::new();
-
-    //     dir_walk.push_back(directory_path.to_path_buf());
-
-    //     let mut spawned_tasks = Vec::new();
-
-    //     while let Some(dir_path) = dir_walk.pop_front() {
-    //         let mut dir_children = {
-    //             if let Ok(children) = fs::read_dir(dir_path).await {
-    //                 children
-    //             } else {
-    //                 continue;
-    //             }
-    //         };
-
-    //         while let Some(dir_child) = dir_children.next().await {
-    //             let dir_child = dir_child.expect("Failed to make dir child.").path();
-
-    //             if dir_child.is_file().await {
-    //                 let printer = printer.clone();
-    //                 let matcher = matcher.clone();
-    //                 let buf_pool = buf_pool.clone();
-
-    //                 let task = async_std::task::spawn(async move {
-    //                     let dir_child_path: &Path = &dir_child;
-    //                     Searcher::search_file(dir_child_path, matcher, printer, buf_pool).await
-    //                 });
-
-    //                 spawned_tasks.push(task);
-    //             } else if dir_child.is_dir().await {
-    //                 dir_walk.push_back(dir_child);
-    //             }
-    //         }
-    //     }
-
-    //     agg_stats.filesystem_walk_dur = start.elapsed();
-
-    //     for task in spawned_tasks {
-    //         let read_stats = task.await;
-    //         agg_stats.fold_in(&read_stats);
-    //     }
-
-    //     agg_stats
-    // }
-
     async fn search_directory(
         directory_path: &Path,
         matcher: M,
@@ -317,7 +248,7 @@ where
 
         let handler = SearchHandler::new(matcher, printer, buffer);
 
-        WorkerPool::spawn(handler, directory_path.into(), receiver, 12).await;
+        WorkerPool::spawn(handler, receiver, 12).await;
 
         stats::ReadStats::default()
     }
