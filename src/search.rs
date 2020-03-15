@@ -6,6 +6,7 @@ use crate::error::{Error, Result};
 use crate::matcher::Matcher;
 use crate::print::{PrintMessage, PrintableResult, PrinterSender};
 use crate::target::Target;
+use crate::walker::Walker;
 use crate::walker_worker::WorkHandler;
 use async_std::fs::File;
 use async_std::io::{BufReader, Read};
@@ -311,9 +312,12 @@ where
     ) -> stats::ReadStats {
         use crate::walker_worker::WorkerPool;
 
+        let (walker, receiver) = Walker::new(directory_path.into());
+        walker.spawn();
+
         let handler = SearchHandler::new(matcher, printer, buffer);
 
-        WorkerPool::spawn(handler, directory_path.into(), 12).await;
+        WorkerPool::spawn(handler, directory_path.into(), receiver, 12).await;
 
         stats::ReadStats::default()
     }
