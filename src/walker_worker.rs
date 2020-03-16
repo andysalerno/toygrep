@@ -46,7 +46,9 @@ impl<T: WorkHandler> WalkerWorker<T> {
                 WalkerMessage::File(path) => {
                     self.work_handler.handle_work(path).await;
                 }
-                WalkerMessage::Quit => {}
+                WalkerMessage::Quit => {
+                    return;
+                }
             }
         }
     }
@@ -70,10 +72,14 @@ impl<T: WorkHandler + Send + Sync + 'static> WorkerPool<T> {
             }));
         }
 
+        eprintln!("All workers spawned.");
+
         drop(rcv);
 
         for work in work_vec {
             work.await;
         }
+
+        eprintln!("All workers completed.");
     }
 }

@@ -32,7 +32,7 @@ impl AsyncLineBufferBuilder {
     pub(crate) fn new() -> Self {
         Self {
             line_break_byte: b'\n',
-            start_size_bytes: 8 * (1 << 10),
+            start_size_bytes: 8 * (1 << 17),
         }
     }
 
@@ -174,7 +174,7 @@ impl AsyncLineBuffer {
         }
 
         let cur_factor = usize::max(1, self.buffer.len());
-        let grow_to = cur_factor * 2;
+        let grow_to = cur_factor + (cur_factor * 2);
         self.buffer.resize(grow_to, 0u8);
     }
 

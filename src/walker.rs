@@ -1,7 +1,6 @@
 use async_std::fs;
-use async_std::path::{Path, PathBuf};
+use async_std::path::{PathBuf};
 use async_std::stream::StreamExt;
-use async_std::task;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::future::Future;
 use std::pin::Pin;
@@ -31,8 +30,10 @@ impl Walker {
             let sender = self.sender.clone();
             let crawler = Crawler::new(self.dir_path, self.sender);
             async_std::task::block_on(async move {
+                eprintln!("Crawling start.");
                 crawler.crawl().await;
                 sender.send(WalkerMessage::Quit).unwrap();
+                eprintln!("Crawling end.");
             });
         })
     }

@@ -179,26 +179,26 @@ where
 
         let name = name.unwrap_or_default();
         while let Some(line_result) = buffer.read_line().await {
-            if binary_bytes_checked < BINARY_CHECK_LEN_BYTES {
-                binary_bytes_checked += line_result.text().len();
-                if !check_utf8(line_result.text()) {
-                    stats.non_utf8_bytes_checked = binary_bytes_checked;
-                    stats.skipped_files_non_utf8 = 1;
-                    return stats;
-                }
-            }
+            // if binary_bytes_checked < BINARY_CHECK_LEN_BYTES {
+            //     binary_bytes_checked += line_result.text().len();
+            //     if !check_utf8(line_result.text()) {
+            //         stats.non_utf8_bytes_checked = binary_bytes_checked;
+            //         stats.skipped_files_non_utf8 = 1;
+            //         return stats;
+            //     }
+            // }
 
-            if matcher.is_match(line_result.text()) {
-                stats.lines_matched_count += 1;
-                stats.lines_matched_bytes += line_result.text().len();
+            // if matcher.is_match(line_result.text()) {
+            //     stats.lines_matched_count += 1;
+            //     stats.lines_matched_bytes += line_result.text().len();
 
-                let printable = PrintableResult::new(
-                    name.clone(),
-                    line_result.line_num(),
-                    line_result.text().into(),
-                );
-                printer.send(PrintMessage::Printable(printable));
-            }
+            //     let printable = PrintableResult::new(
+            //         name.clone(),
+            //         line_result.line_num(),
+            //         line_result.text().into(),
+            //     );
+            //     printer.send(PrintMessage::Printable(printable));
+            // }
         }
 
         printer.send(PrintMessage::EndOfReading { target_name: name });
