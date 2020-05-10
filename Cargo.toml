@@ -18,7 +18,8 @@ termcolor = "1.1.0"
 crossbeam-channel = "0.4"
 
 [dependencies.async-std]
-version = "1.5.0"
+git = "https://github.com/async-rs/async-std"
+rev = "e20b0f0d75d5"
 features = ["attributes"]
 
 [profile.release]
