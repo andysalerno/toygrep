@@ -6,7 +6,7 @@ use crate::print::{PrintMessage, PrintableResult, PrinterSender};
 use crate::target::Target;
 use async_std::fs::{self, File};
 use async_std::io::{BufReader, Read};
-use async_std::path::Path;
+use async_std::path::{Path, PathBuf};
 use async_std::prelude::*;
 use async_std::sync::Arc;
 use std::collections::VecDeque;
@@ -68,82 +68,84 @@ pub(crate) mod stats {
     }
 }
 
-pub(crate) struct SearcherBuilder<M, P>
+pub(crate) struct SearcherBuilder<M, P, W>
 where
     M: Matcher,
     P: PrinterSender,
+    W: Iterator<Item = PathBuf>,
 {
     matcher: M,
     printer: P,
+    walker: W,
 }
 
-impl<M, P> SearcherBuilder<M, P>
+impl<M, P, W> SearcherBuilder<M, P, W>
 where
     M: Matcher,
     P: PrinterSender,
+    W: Iterator<Item = PathBuf>,
 {
-    pub(crate) fn new(matcher: M, printer: P) -> SearcherBuilder<M, P> {
-        Self { matcher, printer }
+    pub(crate) fn new(matcher: M, printer: P, walker: W) -> SearcherBuilder<M, P, W> {
+        Self {
+            matcher,
+            printer,
+            walker,
+        }
     }
 
-    pub(crate) fn build(self) -> Searcher<M, P> {
-        Searcher::new(self.matcher, self.printer)
+    pub(crate) fn build(self) -> Searcher<M, P, W> {
+        Searcher::new(self.matcher, self.printer, self.walker)
     }
 }
 
-pub(crate) struct Searcher<M, P>
+pub(crate) struct Searcher<M, P, W>
 where
     M: Matcher + 'static,
     P: PrinterSender + 'static,
+    W: Iterator<Item = PathBuf>,
 {
     matcher: M,
     printer: P,
+    walker: W,
 }
 
-impl<M, P> Searcher<M, P>
+impl<M, P, W> Searcher<M, P, W>
 where
     M: Matcher + 'static,
     P: PrinterSender + 'static,
+    W: Iterator<Item = PathBuf>,
 {
-    fn new(matcher: M, printer: P) -> Self {
-        Self { matcher, printer }
+    fn new(matcher: M, printer: P, walker: W) -> Self {
+        Self {
+            matcher,
+            printer,
+            walker,
+        }
     }
 
     /// Given some `Target`s, search them using the given `Matcher`
     /// and send the results to the given `Printer`.
     /// `Ok` if every target is an available file or directory (or stdin).
     /// `Err` with a list of failed paths if any of the paths are invalid.
-    pub(crate) async fn search(&self, targets: &'_ [Target]) -> Result<stats::ReadStats> {
+    pub(crate) async fn search(self) -> Result<stats::ReadStats> {
         let mut agg_stats = stats::ReadStats::default();
 
         let mut error_paths = Vec::new();
 
         let buf_pool = Arc::new(BufferPool::new());
 
-        for target in targets {
+        for path in self.walker {
             let matcher = self.matcher.clone();
             let printer = self.printer.clone();
 
-            let stats = match target {
-                Target::Stdin => {
-                    let file_rdr = BufReader::new(async_std::io::stdin());
-                    let line_buf = AsyncLineBufferBuilder::new().build();
-
-                    let mut line_rdr =
-                        AsyncLineBufferReader::new(file_rdr, line_buf).line_nums(false);
-
-                    Searcher::search_via_reader(matcher, &mut line_rdr, None, printer.clone()).await
-                }
-                Target::Path(path) => {
-                    if path.is_file().await {
-                        Searcher::search_file(path, matcher, printer, buf_pool.clone()).await
-                    } else if path.is_dir().await {
-                        Searcher::search_directory(path, matcher, printer, buf_pool.clone()).await
-                    } else {
-                        error_paths.push(format!("{}", path.display()));
-                        stats::ReadStats::default()
-                    }
-                }
+            let stats = if path.is_file().await {
+                Searcher::<_, _, W>::search_file(&path, matcher, printer, buf_pool.clone()).await
+            } else if path.is_dir().await {
+                // Searcher::<_, _, W>::search_directory(&path, matcher, printer, buf_pool.clone()).await
+                stats::ReadStats::default()
+            } else {
+                error_paths.push(format!("{}", path.display()));
+                stats::ReadStats::default()
             };
 
             agg_stats.fold_in(&stats);
@@ -236,8 +238,13 @@ where
 
         let target_name = Some(path.to_string_lossy().to_string());
 
-        let search_result =
-            Searcher::search_via_reader(matcher, &mut line_buf_rdr, target_name, printer).await;
+        let search_result = Searcher::<_, _, W>::search_via_reader(
+            matcher,
+            &mut line_buf_rdr,
+            target_name,
+            printer,
+        )
+        .await;
 
         buf_pool
             .return_to_pool(line_buf_rdr.take_line_buffer())
@@ -295,7 +302,8 @@ where
 
                     let task = async_std::task::spawn(async move {
                         let dir_child_path: &Path = &dir_child;
-                        Searcher::search_file(dir_child_path, matcher, printer, buf_pool).await
+                        Searcher::<_, _, W>::search_file(dir_child_path, matcher, printer, buf_pool)
+                            .await
                     });
 
                     spawned_tasks.push(task);
