@@ -74,10 +74,9 @@ async fn main() {
             let printer = print_builder.make_null();
             let searcher = SearcherBuilder::new(matcher, printer).build();
             searcher.search(&user_input.targets).await
-        }
-        else if user_input.synchronous_printer {
+        } else if user_input.synchronous_printer {
             let printer = print_builder.build_blocking();
-                        let searcher = SearcherBuilder::new(matcher, printer).build();
+            let searcher = SearcherBuilder::new(matcher, printer).build();
             searcher.search(&user_input.targets).await
         } else {
             let (printer, join_handle) = print_builder.spawn_threaded();

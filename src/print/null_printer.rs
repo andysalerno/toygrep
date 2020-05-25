@@ -7,5 +7,4 @@ impl PrinterSender for NullPrinter {
     fn send(&self, _message: PrintMessage) {
         // Do nothing at all.
     }
-
 }
