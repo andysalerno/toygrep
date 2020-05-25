@@ -1,6 +1,7 @@
 mod blocking_printer;
 mod printer;
 mod threaded_printer;
+mod null_printer;
 
 use crate::error::{Error, Result};
 use crate::matcher::Matcher;
@@ -67,6 +68,10 @@ pub(crate) struct Printer<M: Matcher> {
 }
 
 impl<M: Matcher + Sync + 'static> Printer<M> {
+    pub(crate) fn make_null(self) -> impl PrinterSender {
+        null_printer::NullPrinter
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             config: Config {

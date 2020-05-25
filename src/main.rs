@@ -31,6 +31,7 @@ use crate::time_log::TimeLog;
 use matcher::RegexMatcherBuilder;
 use std::clone::Clone;
 use std::time::Instant;
+use target::Target;
 
 #[async_std::main]
 async fn main() {
@@ -64,22 +65,33 @@ async fn main() {
             .print_immediately(print_immediately)
     };
 
+    let path = match &user_input.targets[0] {
+        Target::Stdin => panic!("disabled for now"),
+        Target::Path(p) => p,
+    };
+
+    let (sender, recv) = crossbeam_channel::unbounded();
+    crate::walker::spawn_parallel_walker(path, sender);
+
     // Perform the search, walking the filesystem, detecting matches,
     // and sending them to the printer (note, even after `search` has
     // terminated, the printer thread is likely still processing
     // the results sent to it).
     let status = {
         // TODO: consider using dyn instead of branching
-        if user_input.synchronous_printer {
+        if user_input.quiet {
+            let printer = print_builder.make_null();
+            let searcher = SearcherBuilder::new(matcher, printer, recv.into_iter()).build();
+            searcher.search().await
+        }
+        else if user_input.synchronous_printer {
             let printer = print_builder.build_blocking();
-            let searcher = SearcherBuilder::new(matcher, printer).build();
-            searcher.search(&user_input.targets).await
+            let searcher = SearcherBuilder::new(matcher, printer, recv.into_iter()).build();
+            searcher.search().await
         } else {
             let (printer, join_handle) = print_builder.spawn_threaded();
-            let searcher = SearcherBuilder::new(matcher, printer).build();
-            let result = searcher.search(&user_input.targets).await;
-
-            drop(searcher);
+            let searcher = SearcherBuilder::new(matcher, printer, recv.into_iter()).build();
+            let result = searcher.search().await;
 
             join_handle.join().expect("Couldn't join printing thread.");
 

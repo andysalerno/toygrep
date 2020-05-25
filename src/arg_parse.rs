@@ -9,6 +9,7 @@ pub(crate) struct UserInput {
     pub(crate) whole_word: bool,
     pub(crate) case_insensitive: bool,
     pub(crate) synchronous_printer: bool,
+    pub(crate) quiet: bool,
 
     pub(crate) targets: Vec<Target>,
 
@@ -28,8 +29,9 @@ pub(crate) fn print_help() {
     Options:
     -i, --case-insensitive      Case insensitive match.
     -w, --whole-word            Match whole word.
-    -t, --stats                 Print statistical information with output.,
-    -p, --sync-print            Print synchronous with searching, instead of spawning a dedicated print thread.",
+    -t, --stats                 Print statistical information with output.
+    -p, --sync-print            Print synchronous with searching, instead of spawning a dedicated print thread.
+    -q, --quiet                 Don't run any priting logic at all.",
         exec_name
     );
 }
@@ -50,6 +52,7 @@ pub(crate) fn capture_input(args: impl Iterator<Item = String>) -> UserInput {
             "-w" | "--whole-word" => user_input.whole_word = true,
             "-t" | "--stats" => user_input.stats = true,
             "-p" | "--sync-print" => user_input.synchronous_printer = true,
+            "-q" | "--quiet" => user_input.quiet = true,
             _ => {
                 panic!("Unknown flag: {}", arg);
             }
