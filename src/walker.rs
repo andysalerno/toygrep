@@ -1,17 +1,38 @@
-use async_std::path::{Path, PathBuf};
-use crossbeam_channel::Sender;
-use ignore::{WalkBuilder, WalkState};
+use async_std::path::PathBuf;
+use core::future::Future;
 
-pub(crate) fn spawn_parallel_walker(root: &Path, sender: Sender<PathBuf>) {
-    WalkBuilder::new(root).build_parallel().run(|| {
-        Box::new(|path| {
-            path.map(|p| {
-                while let Err(_) = sender.send(p.clone().into_path().into()) {
-                    std::thread::yield_now();
-                }
-            })
-            .unwrap();
-            WalkState::Continue
-        })
-    });
+struct Walker<F>
+where F: Future<Output = ()> + Send + 'static
+{
+    path: PathBuf,
+    action: F 
+}
+
+impl<F> Walker<F>
+where F: Future<Output = ()> + Send + 'static
+ {
+    fn new(path: PathBuf, action: F) -> Self {
+        Walker { path, action }
+    }
+
+    async fn run(self) {
+        async_std::task::spawn(self.action).await;
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn try_run_future() {
+        async_std::task::block_on(async {
+            let walker = Walker::new("test".into(), async {
+                println!("\n\n\nyo!!\n\n");
+                assert!(false, "yo!!!");
+            });
+            walker.run().await;
+        });
+    }
+
 }

@@ -13,6 +13,7 @@ pub(crate) trait Matcher: Clone + Send {
     fn find_matches(&self, bytes: &[u8]) -> Vec<Match>;
 }
 
+/// A stub of a Matcher that never finds a match.
 #[derive(Debug, Clone)]
 pub(crate) struct DummyMatcher;
 
