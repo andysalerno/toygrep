@@ -14,6 +14,18 @@ pub(crate) trait Matcher: Clone + Send {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct DummyMatcher;
+
+impl Matcher for DummyMatcher {
+    fn is_match(&self, _bytes: &[u8]) -> bool {
+        false
+    }
+    fn find_matches(&self, _bytes: &[u8]) -> Vec<Match> {
+        Vec::new()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct RegexMatcher {
     regex: Regex,
 }

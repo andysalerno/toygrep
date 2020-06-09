@@ -29,6 +29,7 @@ use crate::search::stats::ReadStats;
 use crate::search::SearcherBuilder;
 use crate::time_log::TimeLog;
 use matcher::RegexMatcherBuilder;
+use matcher::DummyMatcher;
 use std::clone::Clone;
 use std::time::Instant;
 
@@ -43,11 +44,12 @@ async fn main() {
         return;
     }
 
-    let matcher = RegexMatcherBuilder::new()
-        .for_pattern(&user_input.search_pattern)
-        .case_insensitive(user_input.case_insensitive)
-        .match_whole_word(user_input.whole_word)
-        .build();
+    // let matcher = RegexMatcherBuilder::new()
+    //     .for_pattern(&user_input.search_pattern)
+    //     .case_insensitive(user_input.case_insensitive)
+    //     .match_whole_word(user_input.whole_word)
+    //     .build();
+    let matcher = DummyMatcher;
 
     let print_builder = {
         let first_target = user_input.targets.first();
