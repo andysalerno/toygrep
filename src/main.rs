@@ -29,8 +29,8 @@ use crate::print::Printer;
 use crate::search::stats::ReadStats;
 use crate::search::SearcherBuilder;
 use crate::time_log::TimeLog;
-use matcher::RegexMatcherBuilder;
 use matcher::DummyMatcher;
+use matcher::RegexMatcherBuilder;
 use std::clone::Clone;
 use std::time::Instant;
 
