@@ -80,7 +80,7 @@ where
 impl<M, P> SearcherBuilder<M, P>
 where
     M: Matcher,
-    P: PrinterSender,
+    P: PrinterSender + Sync,
 {
     pub(crate) fn new(matcher: M, printer: P) -> SearcherBuilder<M, P> {
         Self { matcher, printer }
@@ -94,7 +94,7 @@ where
 pub(crate) struct Searcher<M, P>
 where
     M: Matcher + 'static,
-    P: PrinterSender + 'static,
+    P: PrinterSender + Sync + 'static,
 {
     matcher: M,
     printer: P,
@@ -103,17 +103,39 @@ where
 impl<M, P> Searcher<M, P>
 where
     M: Matcher + 'static,
-    P: PrinterSender + 'static,
+    P: PrinterSender + Sync + 'static,
 {
     fn new(matcher: M, printer: P) -> Self {
         Self { matcher, printer }
+    }
+
+    pub(crate) async fn search(&'_ self, targets: &'_ [Target]) -> Result<stats::ReadStats> {
+        use async_crawl::Crawler;
+        let crawler = async_crawl::singlethread_crawler::make_crawler();
+
+        let target = &targets[0];
+
+        let path = match target {
+            Target::Path(pathbuf) => pathbuf,
+            Target::Stdin => panic!("Stdin not supported right now."),
+        };
+
+        let path: std::path::PathBuf = path.into();
+
+        let printer = self.printer.clone();
+
+        crawler.crawl(&path, move |p| {
+            printer.send(PrintMessage::Display(format!("Saw path: {:?}\n", p)));
+        });
+
+        Ok(stats::ReadStats::default())
     }
 
     /// Given some `Target`s, search them using the given `Matcher`
     /// and send the results to the given `Printer`.
     /// `Ok` if every target is an available file or directory (or stdin).
     /// `Err` with a list of failed paths if any of the paths are invalid.
-    pub(crate) async fn search(&self, targets: &'_ [Target]) -> Result<stats::ReadStats> {
+    pub(crate) async fn search_1(&self, targets: &'_ [Target]) -> Result<stats::ReadStats> {
         let mut agg_stats = stats::ReadStats::default();
 
         let mut error_paths = Vec::new();
@@ -270,13 +292,13 @@ where
 
         let mut agg_stats = stats::ReadStats::default();
 
-        let mut dir_walk = VecDeque::new();
+        let mut dir_stack = vec![];
 
-        dir_walk.push_back(directory_path.to_path_buf());
+        dir_stack.push(directory_path.to_path_buf());
 
-        let mut spawned_tasks = Vec::new();
+        let mut spawned_tasks = vec![];
 
-        while let Some(dir_path) = dir_walk.pop_front() {
+        while let Some(dir_path) = dir_stack.pop() {
             let mut dir_children = {
                 if let Ok(children) = fs::read_dir(dir_path).await {
                     children
@@ -285,22 +307,22 @@ where
                 }
             };
 
-            while let Some(dir_child) = dir_children.next().await {
-                let dir_child = dir_child.expect("Failed to make dir child.").path();
+            while let Some(Ok(dir_entry)) = dir_children.next().await {
+                let meta = dir_entry.metadata().await.unwrap();
 
-                if dir_child.is_file().await {
+                if meta.is_file() {
                     let printer = printer.clone();
                     let matcher = matcher.clone();
                     let buf_pool = buf_pool.clone();
 
                     let task = async_std::task::spawn(async move {
-                        let dir_child_path: &Path = &dir_child;
+                        let dir_child_path: &Path = &dir_entry.path();
                         Searcher::search_file(dir_child_path, matcher, printer, buf_pool).await
                     });
 
                     spawned_tasks.push(task);
-                } else if dir_child.is_dir().await {
-                    dir_walk.push_back(dir_child);
+                } else if meta.is_dir() {
+                    dir_stack.push(dir_entry.path());
                 }
             }
         }

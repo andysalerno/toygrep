@@ -44,12 +44,12 @@ async fn main() {
         return;
     }
 
-    // let matcher = RegexMatcherBuilder::new()
-    //     .for_pattern(&user_input.search_pattern)
-    //     .case_insensitive(user_input.case_insensitive)
-    //     .match_whole_word(user_input.whole_word)
-    //     .build();
-    let matcher = DummyMatcher;
+    let matcher = RegexMatcherBuilder::new()
+        .for_pattern(&user_input.search_pattern)
+        .case_insensitive(user_input.case_insensitive)
+        .match_whole_word(user_input.whole_word)
+        .build();
+    // let matcher = DummyMatcher;
 
     let print_builder = {
         let first_target = user_input.targets.first();
@@ -84,6 +84,8 @@ async fn main() {
             let (printer, join_handle) = print_builder.spawn_threaded();
             let searcher = SearcherBuilder::new(matcher, printer).build();
             let result = searcher.search(&user_input.targets).await;
+
+            drop(searcher);
 
             join_handle.join().expect("Couldn't join printing thread.");
 

@@ -6,7 +6,7 @@ mod threaded_printer;
 use crate::error::{Error, Result};
 use crate::matcher::Matcher;
 use crate::time_log::TimeLog;
-use crossbeam_channel::unbounded;
+use crossbeam_channel::bounded;
 use printer::PrettyPrinter;
 use std::thread;
 
@@ -103,7 +103,7 @@ impl<M: Matcher + Sync + 'static> Printer<M> {
     }
 
     pub(crate) fn spawn_threaded(self) -> (impl PrinterSender, std::thread::JoinHandle<TimeLog>) {
-        let (sender, receiver) = unbounded();
+        let (sender, receiver) = bounded(128);
         let sender = crate::print::threaded_printer::Sender::new(sender);
         let mut printer =
             crate::print::threaded_printer::Printer::new(self.matcher, receiver, self.config);
