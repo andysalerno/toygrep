@@ -79,7 +79,7 @@ where
 
 impl<M, P> SearcherBuilder<M, P>
 where
-    M: Matcher,
+    M: Matcher + Sync,
     P: PrinterSender + Sync,
 {
     pub(crate) fn new(matcher: M, printer: P) -> SearcherBuilder<M, P> {
@@ -102,7 +102,7 @@ where
 
 impl<M, P> Searcher<M, P>
 where
-    M: Matcher + 'static,
+    M: Matcher + Sync + 'static,
     P: PrinterSender + Sync + 'static,
 {
     fn new(matcher: M, printer: P) -> Self {
@@ -110,8 +110,9 @@ where
     }
 
     pub(crate) async fn search(&'_ self, targets: &'_ [Target]) -> Result<stats::ReadStats> {
-        use async_crawl::Crawler;
-        let crawler = async_crawl::singlethread_crawler::make_crawler();
+        use async_crawl::{AsyncCrawler, Crawler};
+        // let crawler = async_crawl::singlethread_crawler::make_crawler();
+        let crawler = async_crawl::async_scaled_crawler::make_crawler(6);
 
         let target = &targets[0];
 
@@ -122,11 +123,15 @@ where
 
         let path: std::path::PathBuf = path.into();
 
+        let buf_pool = Arc::new(BufferPool::new());
         let printer = self.printer.clone();
+        let matcher = self.matcher.clone();
 
-        crawler.crawl(&path, move |p| {
-            printer.send(PrintMessage::Display(format!("Saw path: {:?}\n", p)));
-        });
+        crawler
+            .crawl(&path, move |p| async move {
+                Searcher::search_file(&p.path(), matcher, printer, buf_pool.clone()).await;
+            })
+            .await;
 
         Ok(stats::ReadStats::default())
     }
