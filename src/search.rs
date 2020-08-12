@@ -111,8 +111,8 @@ where
 
     pub(crate) async fn search(&'_ self, targets: &'_ [Target]) -> Result<stats::ReadStats> {
         use async_crawl::{AsyncCrawler, Crawler};
-        // let crawler = async_crawl::singlethread_crawler::make_crawler();
-        let crawler = async_crawl::async_scaled_crawler::make_crawler(6);
+        let crawler = async_crawl::singlethread_crawler::make_crawler();
+        // let crawler = async_crawl::async_scaled_crawler::make_crawler(6);
 
         let target = &targets[0];
 
@@ -127,11 +127,12 @@ where
         let printer = self.printer.clone();
         let matcher = self.matcher.clone();
 
-        crawler
-            .crawl(&path, move |p| async move {
-                Searcher::search_file(&p.path(), matcher, printer, buf_pool.clone()).await;
-            })
-            .await;
+        crawler.crawl(&path, move |p| {
+            async_std::task::block_on(async move {
+                let pathbuf: async_std::path::PathBuf = p.into_pathbuf().into();
+                Searcher::search_file(&pathbuf, matcher, printer, buf_pool.clone()).await;
+            });
+        });
 
         Ok(stats::ReadStats::default())
     }
